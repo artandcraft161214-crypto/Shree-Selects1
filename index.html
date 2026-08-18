@@ -1,1 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ReelToTube Automation</title>
 
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: Arial, Helvetica, sans-serif;
+            background: #f5f7fb;
+            color: #1f2937;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 40px auto;
+            padding: 20px;
+        }
+
+        .header {
+            background: #111827;
+            color: white;
+            padding: 25px;
+            border-radius: 14px;
+            margin-bottom: 25px;
+        }
+
+        .header h1 {
+            margin: 0 0 8px;
+            font-size: 28px;
+        }
+
+        .header p {
+            margin: 0;
+            color: #cbd5e1;
+        }
+
+        .card {
+            background: white;
+            border-radius: 14px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.06);
+        }
+
+        .card h2 {
+            margin-top: 0;
+        }
+
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        input,
+        textarea,
+        select {
+            width: 100%;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 15px;
+            font-family: inherit;
+            margin-bottom: 18px;
+            outline: none;
+        }
+
+        input:focus,
+        textarea:focus,
+        select:focus {
+            border-color: #2563eb;
+        }
+
+        textarea {
+            min-height: 130px;
+            resize: vertical;
+        }
+
+        .seo-box {
+            min-height: 100px;
+        }
+
+        .counter {
+            text-align: right;
+            margin-top: -12px;
+            margin-bottom: 15px;
+            font-size: 13px;
+            color: #6b7280;
+        }
+
+        .buttons {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            border: none;
+            border-radius: 8px;
+            padding: 13px 20px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .primary {
+            background: #2563eb;
+            color: white;
+        }
+
+        .primary:hover {
+            background: #1d4ed8;
+        }
+
+        .secondary {
+            background: #e5e7eb;
+            color: #111827;
+        }
+
+        .success {
+            background: #16a34a;
+            color: white;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .status {
+            padding: 14px;
+            border-radius: 8px;
+            background: #eff6ff;
+            color: #1d4ed8;
+            margin-top: 15px;
+            display: none;
+        }
+
+        .review-section {
+            display: none;
+        }
+
+        .row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 20px;
+            background: #fef3c7;
+            color: #92400e;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .warning {
+            background: #fff7ed;
+            color: #9a3412;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 18px;
+            font-size: 14px;
+        }
+
+        @media (max-width: 700px) {
+            .row {
+                grid-template-columns: 1fr;
+            }
+
+            .container {
+                margin: 15px auto;
+                padding: 12px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="container">
+
+    <div class="header">
+        <h1>🎬 ReelToTube Automation</h1>
+        <p>Instagram Reel → AI Metadata → Review → YouTube Upload</p>
+    </div>
+
+    <!-- STEP 1 -->
+    <div class="card">
+        <h2>1. Instagram Reel</h2>
+
+        <label for="instagramUrl">
+            Instagram Reel URL
+        </label>
+
+        <input
+            type="url"
+            id="instagramUrl"
+            placeholder="https://www.instagram.com/reel/..."
+        >
+
+        <div class="buttons">
+            <button
+                class="primary"
+                onclick="generateMetadata()"
+                id="generateBtn"
+            >
+                Generate Metadata
+            </button>
+        </div>
+
+        <div id="status" class="status"></div>
+    </div>
+
+
+    <!-- STEP 2 -->
+    <div class="card review-section" id="reviewSection">
+
+        <h2>2. Review Before Upload</h2>
+
+        <div class="warning">
+            ⚠️ Nothing will be uploaded until you click
+            <strong>Submit & Upload to YouTube</strong>.
+            You can edit all metadata below.
+        </div>
+
+        <label for="title">
+            YouTube Title
+        </label>
+
+        <input
+            type="text"
+            id="title"
+            placeholder="Enter YouTube title"
+        >
+
+
+        <label for="description">
+            YouTube Description
+        </label>
+
+        <textarea
+            id="description"
+            placeholder="Enter YouTube description"
+        ></textarea>
+
+
+        <label for="hashtags">
+            Hashtags
+        </label>
+
+        <textarea
+            id="hashtags"
+            placeholder="#Shorts #Viral #Trending..."
+        ></textarea>
+
+
+        <label for="seoTags">
+            SEO Tags
+        </label>
+
+        <textarea
+            id="seoTags"
+            class="seo-box"
+            maxlength="500"
+            placeholder="dance, viral dance, shorts, trending..."
+            oninput="updateCounter()"
+        ></textarea>
+
+        <div class="counter">
+            <span id="seoCounter">0</span> / 500 characters
+        </div>
+
+
+        <div class="row">
+
+            <div>
+                <label for="visibility">
+                    YouTube Visibility
+                </label>
+
+                <select id="visibility">
+                    <option value="public">🌎 Public</option>
+                    <option value="unlisted">🔗 Unlisted</option>
+                    <option value="private">🔒 Private</option>
+                </select>
+            </div>
+
+            <div>
+                <label>
+                    Upload Status
+                </label>
+
+                <span class="badge">
+                    Review Required
+                </span>
+            </div>
+
+        </div>
+
+
+        <div class="buttons">
+
+            <button
+                class="secondary"
+                onclick="resetReview()"
+            >
+                Clear
+            </button>
+
+            <button
+                class="success"
+                onclick="submitUpload()"
+                id="uploadBtn"
+            >
+                🚀 Submit & Upload to YouTube
+            </button>
+
+        </div>
+
+    </div>
+
+
+    <!-- STEP 3 -->
+    <div class="card review-section" id="resultSection">
+
+        <h2>3. Upload Result</h2>
+
+        <div id="resultMessage"></div>
+
+    </div>
+
+</div>
+
+
+<script>
+
+    /*
+     * Temporary frontend logic.
+     *
+     * The GitHub Actions connection will be added
+     * in the next step.
+     */
+
+    function showStatus(message) {
+
+        const status = document.getElementById("status");
+
+        status.innerText = message;
+        status.style.display = "block";
+    }
+
+
+    function generateMetadata() {
+
+        const url =
+            document.getElementById("instagramUrl").value.trim();
+
+        if (!url) {
+
+            showStatus(
+                "Please enter an Instagram Reel URL."
+            );
+
+            return;
+        }
+
+        if (!url.includes("instagram.com")) {
+
+            showStatus(
+                "Please enter a valid Instagram URL."
+            );
+
+            return;
+        }
+
+        showStatus(
+            "⏳ Instagram Reel submitted. AI metadata generation will be connected next."
+        );
+
+        /*
+         * Demo metadata so we can test the review UI.
+         * Later GitHub Actions/Gemini will replace this.
+         */
+
+        document.getElementById("title").value =
+            "Amazing Viral Reel 🔥 #Shorts";
+
+        document.getElementById("description").value =
+            "Watch this amazing viral reel! 🔥\n\n" +
+            "Like, share and subscribe for more amazing Shorts.\n\n" +
+            "#Shorts #Viral #Trending";
+
+        document.getElementById("hashtags").value =
+            "#Shorts #ViralShorts #Trending #Viral #Reels #ShortVideo";
+
+        document.getElementById("seoTags").value =
+            "viral shorts, instagram reel, trending reel, viral video, youtube shorts, trending shorts, short video";
+
+        document.getElementById("visibility").value =
+            "public";
+
+        updateCounter();
+
+        document.getElementById("reviewSection").style.display =
+            "block";
+
+        document.getElementById("reviewSection").scrollIntoView({
+            behavior: "smooth"
+        });
+    }
+
+
+    function updateCounter() {
+
+        const value =
+            document.getElementById("seoTags").value;
+
+        document.getElementById("seoCounter").innerText =
+            value.length;
+    }
+
+
+    function resetReview() {
+
+        document.getElementById("title").value = "";
+        document.getElementById("description").value = "";
+        document.getElementById("hashtags").value = "";
+        document.getElementById("seoTags").value = "";
+
+        updateCounter();
+
+        document.getElementById("reviewSection").style.display =
+            "none";
+
+        document.getElementById("resultSection").style.display =
+            "none";
+
+        showStatus("");
+        document.getElementById("status").style.display =
+            "none";
+    }
+
+
+    function submitUpload() {
+
+        const title =
+            document.getElementById("title").value.trim();
+
+        const description =
+            document.getElementById("description").value.trim();
+
+        const hashtags =
+            document.getElementById("hashtags").value.trim();
+
+        const seoTags =
+            document.getElementById("seoTags").value.trim();
+
+        const visibility =
+            document.getElementById("visibility").value;
+
+        if (!title) {
+
+            alert("Please enter a YouTube title.");
+            return;
+        }
+
+        if (!description) {
+
+            alert("Please enter a description.");
+            return;
+        }
+
+        if (seoTags.length > 500) {
+
+            alert("SEO Tags must be 500 characters or less.");
+            return;
+        }
+
+        /*
+         * IMPORTANT:
+         * We will connect this button to GitHub Actions
+         * after the UI is confirmed working.
+         */
+
+        const result =
+            document.getElementById("resultSection");
+
+        const message =
+            document.getElementById("resultMessage");
+
+        message.innerHTML = `
+            <div class="warning">
+                ✅ Metadata approved successfully.<br><br>
+
+                <strong>Title:</strong>
+                ${escapeHtml(title)}<br><br>
+
+                <strong>Visibility:</strong>
+                ${escapeHtml(visibility)}<br><br>
+
+                <strong>Status:</strong>
+                Ready to send to GitHub Actions.
+            </div>
+        `;
+
+        result.style.display = "block";
+
+        result.scrollIntoView({
+            behavior: "smooth"
+        });
+
+        console.log({
+            instagramUrl:
+                document.getElementById("instagramUrl").value,
+
+            title: title,
+
+            description: description,
+
+            hashtags: hashtags,
+
+            seoTags: seoTags,
+
+            visibility: visibility
+        });
+    }
+
+
+    function escapeHtml(text) {
+
+        const div =
+            document.createElement("div");
+
+        div.innerText = text;
+
+        return div.innerHTML;
+    }
+
+</script>
+
+</body>
+</html>
