@@ -1,0 +1,633 @@
+name: Upload Approved Short
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "GitHub Run ID containing the processed Reel"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # ============================================================
+      # 1. CHECKOUT
+      # ============================================================
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+
+      # ============================================================
+      # 2. SHOW RUN ID
+      # ============================================================
+      - name: Show Run ID
+        run: |
+          echo "=========================================="
+          echo "       UPLOAD APPROVED SHORT"
+          echo "=========================================="
+          echo ""
+          echo "Source Run ID:"
+          echo "${{ inputs.run_id }}"
+          echo ""
+
+
+      # ============================================================
+      # 3. DOWNLOAD REVIEW ARTIFACT
+      # ============================================================
+      - name: Download processed Reel package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id }}
+        run: |
+
+          echo "=========================================="
+          echo "       DOWNLOADING REVIEW PACKAGE"
+          echo "=========================================="
+
+          mkdir -p review
+
+          ARTIFACT_NAME="ReelToTube-Review-${RUN_ID}"
+
+          echo "Artifact:"
+          echo "${ARTIFACT_NAME}"
+
+          gh run download "${RUN_ID}" \
+            --repo "${{ github.repository }}" \
+            --name "${ARTIFACT_NAME}" \
+            --dir review
+
+          echo ""
+          echo "Downloaded files:"
+          find review -maxdepth 2 -type f -print
+
+
+      # ============================================================
+      # 4. CHECK REVIEW PACKAGE
+      # ============================================================
+      - name: Check review package
+        run: |
+
+          echo "=========================================="
+          echo "       CHECKING REVIEW PACKAGE"
+          echo "=========================================="
+
+          if [ ! -f "review/youtube_short.mp4" ]; then
+            echo "ERROR: youtube_short.mp4 not found."
+            exit 1
+          fi
+
+          if [ ! -f "review/metadata.json" ]; then
+            echo "ERROR: metadata.json not found."
+            exit 1
+          fi
+
+          echo ""
+          echo "Video:"
+          ls -lh review/youtube_short.mp4
+
+          echo ""
+          echo "Metadata:"
+          cat review/metadata.json
+
+
+      # ============================================================
+      # 5. INSTALL PYTHON DEPENDENCIES
+      # ============================================================
+      - name: Install YouTube API dependencies
+        run: |
+
+          python3 -m pip install --upgrade pip
+
+          python3 -m pip install \
+            google-api-python-client \
+            google-auth \
+            google-auth-oauthlib \
+            google-auth-httplib2
+
+
+      # ============================================================
+      # 6. PREPARE METADATA
+      # ============================================================
+      - name: Prepare YouTube metadata
+        run: |
+
+          python3 - <<'PY'
+
+          import json
+
+          with open(
+              "review/metadata.json",
+              "r",
+              encoding="utf-8"
+          ) as f:
+              data = json.load(f)
+
+
+          title = str(
+              data.get("title", "")
+          ).strip()
+
+
+          description = str(
+              data.get("description", "")
+          ).strip()
+
+
+          tags = data.get(
+              "tags",
+              ""
+          )
+
+
+          category = str(
+              data.get("category", "")
+          ).strip()
+
+
+          if isinstance(tags, str):
+
+              tags = [
+                  x.strip()
+                  for x in tags.split(",")
+                  if x.strip()
+              ]
+
+          elif isinstance(tags, list):
+
+              tags = [
+                  str(x).strip()
+                  for x in tags
+                  if str(x).strip()
+              ]
+
+          else:
+
+              tags = []
+
+
+          if not title:
+              raise RuntimeError(
+                  "YouTube title is empty."
+              )
+
+
+          if not description:
+              raise RuntimeError(
+                  "YouTube description is empty."
+              )
+
+
+          # YouTube category IDs
+
+          category_map = {
+
+              "Music": "10",
+
+              "Entertainment": "24",
+
+              "People & Blogs": "22",
+
+              "Comedy": "23",
+
+              "Sports": "17",
+
+              "Howto & Style": "26",
+
+              "Education": "27"
+
+          }
+
+
+          category_id = category_map.get(
+              category,
+              "24"
+          )
+
+
+          output = {
+
+              "title": title,
+
+              "description": description,
+
+              "tags": tags,
+
+              "category_id": category_id
+
+          }
+
+
+          with open(
+              "review/youtube_upload.json",
+              "w",
+              encoding="utf-8"
+          ) as f:
+
+              json.dump(
+                  output,
+                  f,
+                  ensure_ascii=False,
+                  indent=2
+              )
+
+
+          print("")
+          print("==========================================")
+          print("       YOUTUBE UPLOAD METADATA")
+          print("==========================================")
+
+          print("")
+          print("TITLE:")
+          print(title)
+
+          print("")
+          print("CATEGORY:")
+          print(category)
+
+          print("")
+          print("CATEGORY ID:")
+          print(category_id)
+
+          print("")
+          print("DESCRIPTION:")
+          print(description)
+
+          print("")
+          print("TAGS:")
+          print(",".join(tags))
+
+          print("")
+
+          PY
+
+
+      # ============================================================
+      # 7. UPLOAD TO YOUTUBE
+      # ============================================================
+      - name: Upload Short to YouTube
+        env:
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+
+        run: |
+
+          cat > upload_youtube.py <<'PY'
+
+          import os
+          import json
+          import sys
+
+          from google.oauth2.credentials import Credentials
+
+          from googleapiclient.discovery import build
+
+          from googleapiclient.http import MediaFileUpload
+
+
+          # ========================================================
+          # LOAD SECRETS
+          # ========================================================
+
+          client_id = os.environ.get(
+              "YOUTUBE_CLIENT_ID"
+          )
+
+          client_secret = os.environ.get(
+              "YOUTUBE_CLIENT_SECRET"
+          )
+
+          refresh_token = os.environ.get(
+              "YOUTUBE_REFRESH_TOKEN"
+          )
+
+
+          if not client_id:
+              raise RuntimeError(
+                  "YOUTUBE_CLIENT_ID secret is missing."
+              )
+
+
+          if not client_secret:
+              raise RuntimeError(
+                  "YOUTUBE_CLIENT_SECRET secret is missing."
+              )
+
+
+          if not refresh_token:
+              raise RuntimeError(
+                  "YOUTUBE_REFRESH_TOKEN secret is missing."
+              )
+
+
+          # ========================================================
+          # LOAD METADATA
+          # ========================================================
+
+          with open(
+              "review/youtube_upload.json",
+              "r",
+              encoding="utf-8"
+          ) as f:
+
+              metadata = json.load(f)
+
+
+          title = metadata["title"]
+
+          description = metadata["description"]
+
+          tags = metadata["tags"]
+
+          category_id = metadata["category_id"]
+
+
+          # ========================================================
+          # YOUTUBE OAUTH
+          # ========================================================
+
+          credentials = Credentials(
+
+              token=None,
+
+              refresh_token=refresh_token,
+
+              token_uri="https://oauth2.googleapis.com/token",
+
+              client_id=client_id,
+
+              client_secret=client_secret,
+
+              scopes=[
+                  "https://www.googleapis.com/auth/youtube.upload"
+              ]
+
+          )
+
+
+          # ========================================================
+          # BUILD YOUTUBE API CLIENT
+          # ========================================================
+
+          youtube = build(
+              "youtube",
+              "v3",
+              credentials=credentials
+          )
+
+
+          # ========================================================
+          # VIDEO UPLOAD
+          # ========================================================
+
+          print("")
+          print("==========================================")
+          print("          UPLOADING TO YOUTUBE")
+          print("==========================================")
+
+          print("")
+          print("Title:")
+          print(title)
+
+          print("")
+          print("Category ID:")
+          print(category_id)
+
+          print("")
+          print("Tags:")
+          print(",".join(tags))
+
+
+          body = {
+
+              "snippet": {
+
+                  "title": title,
+
+                  "description": description,
+
+                  "tags": tags,
+
+                  "categoryId": category_id
+
+              },
+
+              "status": {
+
+                  "privacyStatus": "public",
+
+                  "selfDeclaredMadeForKids": False
+
+              }
+
+          }
+
+
+          media = MediaFileUpload(
+
+              "review/youtube_short.mp4",
+
+              mimetype="video/mp4",
+
+              resumable=True
+
+          )
+
+
+          request = youtube.videos().insert(
+
+              part="snippet,status",
+
+              body=body,
+
+              media_body=media
+
+          )
+
+
+          response = None
+
+
+          while response is None:
+
+              status, response = request.next_chunk()
+
+              if status:
+
+                  progress = int(
+                      status.progress() * 100
+                  )
+
+                  print(
+                      f"Upload progress: {progress}%"
+                  )
+
+
+          video_id = response.get(
+              "id"
+          )
+
+
+          if not video_id:
+
+              print(
+                  "YouTube response:"
+              )
+
+              print(response)
+
+              raise RuntimeError(
+                  "YouTube upload failed."
+              )
+
+
+          video_url = (
+              "https://www.youtube.com/watch?v="
+              + video_id
+          )
+
+
+          print("")
+          print("==========================================")
+          print("       YOUTUBE UPLOAD SUCCESSFUL")
+          print("==========================================")
+
+          print("")
+          print("Video ID:")
+          print(video_id)
+
+          print("")
+          print("YouTube URL:")
+          print(video_url)
+
+          print("")
+          print("==========================================")
+
+
+          # Save result
+
+          result = {
+
+              "video_id": video_id,
+
+              "url": video_url,
+
+              "title": title
+
+          }
+
+
+          with open(
+              "review/upload_result.json",
+              "w",
+              encoding="utf-8"
+          ) as f:
+
+              json.dump(
+                  result,
+                  f,
+                  ensure_ascii=False,
+                  indent=2
+              )
+
+          PY
+
+
+          python3 upload_youtube.py
+
+
+      # ============================================================
+      # 8. GITHUB SUMMARY
+      # ============================================================
+      - name: Create Upload Summary
+        run: |
+
+          echo "# 🎬 ReelToTube - YouTube Upload" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+          echo "" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+          echo "## ✅ Upload Successful" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+          echo "" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+
+          import json
+
+          with open(
+              "review/upload_result.json",
+              "r",
+              encoding="utf-8"
+          ) as f:
+
+              data = json.load(f)
+
+
+          print(
+              "**Title:** "
+              + data.get("title", "")
+          )
+
+          print("")
+
+          print(
+              "**Video ID:** "
+              + data.get("video_id", "")
+          )
+
+          print("")
+
+          print(
+              "**YouTube URL:** "
+              + data.get("url", "")
+          )
+
+          PY
+
+
+      # ============================================================
+      # 9. UPLOAD RESULT ARTIFACT
+      # ============================================================
+      - name: Save Upload Result
+        uses: actions/upload-artifact@v4
+
+        with:
+
+          name: ReelToTube-Upload-Result-${{ github.run_id }}
+
+          path: |
+
+            review/upload_result.json
+            review/youtube_upload.json
+
+          retention-days: 7
+
+
+      # ============================================================
+      # 10. FINAL STATUS
+      # ============================================================
+      - name: Upload Complete
+        run: |
+
+          echo ""
+          echo "=========================================="
+          echo "       REELTOTUBE UPLOAD COMPLETE"
+          echo "=========================================="
+
+          echo ""
+          echo "The approved Short was uploaded to YouTube."
+
+          echo ""
+          echo "=========================================="
