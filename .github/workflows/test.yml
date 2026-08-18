@@ -142,7 +142,11 @@ jobs:
 
           python3 -m pip install \
             opencv-python-headless \
-            numpy
+            numpy \
+            google-api-python-client \
+            google-auth \
+            google-auth-httplib2 \
+            google-auth-oauthlib
 
 
       # ============================================================
@@ -1696,17 +1700,6 @@ jobs:
           print("==========================================")
 
           PY
-# ============================================================
-# INSTALL YOUTUBE API DEPENDENCIES
-# ============================================================
-- name: Install YouTube API dependencies
-  run: |
-    python -m pip install --upgrade pip
-    python -m pip install \
-      google-api-python-client \
-      google-auth \
-      google-auth-oauthlib \
-      google-auth-httplib2
 
 
       # ============================================================
