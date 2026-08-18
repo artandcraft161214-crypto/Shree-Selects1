@@ -1,1 +1,1973 @@
+name: ReelToTube Processor
 
+on:
+  workflow_dispatch:
+    inputs:
+      instagram_url:
+        description: "Instagram Reel URL"
+        required: true
+        type: string
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # ==========================================
+      # 1. Checkout
+      # ==========================================
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+
+      # ==========================================
+      # 2. Show URL
+      # ==========================================
+      - name: Show Reel URL
+        run: |
+          echo "================================"
+          echo "ReelToTube Processor"
+          echo "================================"
+          echo "Instagram URL:"
+          echo "${{ inputs.instagram_url }}"
+          echo "================================"
+
+
+      # ==========================================
+      # 3. Install FFmpeg
+      # ==========================================
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+          ffmpeg -version | head -n 3
+          ffprobe -version | head -n 3
+
+
+      # ==========================================
+      # 4. Python
+      # ==========================================
+      - name: Check Python
+        run: |
+          python3 --version
+          python3 -m pip --version
+
+
+      # ==========================================
+      # 5. Install yt-dlp
+      # ==========================================
+      - name: Install yt-dlp
+        run: |
+          python3 -m pip install --upgrade yt-dlp
+          yt-dlp --version
+
+
+      # ==========================================
+      # 6. Download Instagram Reel
+      # ==========================================
+      - name: Download Instagram Reel
+        run: |
+          mkdir -p output
+
+          echo "================================"
+          echo "DOWNLOADING INSTAGRAM REEL"
+          echo "================================"
+
+          yt-dlp \
+            --no-playlist \
+            --merge-output-format mp4 \
+            -o "output/reel.%(ext)s" \
+            "${{ inputs.instagram_url }}"
+
+          echo "================================"
+          echo "DOWNLOAD COMPLETE"
+          echo "================================"
+
+          ls -lh output/
+
+
+      # ==========================================
+      # 7. Check downloaded video
+      # ==========================================
+      - name: Check downloaded video
+        run: |
+          echo "================================"
+          echo "DOWNLOADED VIDEO INFORMATION"
+          echo "================================"
+
+          ls -lh output/
+
+          ffprobe \
+            -v error \
+            -show_entries format=duration,size \
+            -of default=noprint_wrappers=1 \
+            output/reel.mp4
+
+
+      # ==========================================
+      # 8. Install video analysis tools
+      # ==========================================
+      - name: Install video analysis tools
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install opencv-python-headless numpy
+
+
+      # ==========================================
+      # 9. Find best section
+      # ==========================================
+      - name: Find best section
+        run: |
+
+          cat > analyze_video.py <<'PY'
+
+          import cv2
+          import numpy as np
+
+          video = "output/reel.mp4"
+
+          cap = cv2.VideoCapture(video)
+
+          fps = cap.get(cv2.CAP_PROP_FPS)
+          frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+          if fps <= 0:
+              fps = 30
+
+          duration = frames / fps
+
+          print("================================")
+          print("VIDEO ANALYSIS")
+          print("================================")
+          print(f"FPS: {fps}")
+          print(f"Frames: {frames}")
+          print(f"Duration: {duration:.2f} seconds")
+
+          short_length = min(30.0, duration)
+
+          scores = []
+
+          previous = None
+          second = 0
+
+          while True:
+
+              cap.set(
+                  cv2.CAP_PROP_POS_MSEC,
+                  second * 1000
+              )
+
+              ret, frame = cap.read()
+
+              if not ret:
+                  break
+
+              frame = cv2.resize(
+                  frame,
+                  (320, 180)
+              )
+
+              gray = cv2.cvtColor(
+                  frame,
+                  cv2.COLOR_BGR2GRAY
+              )
+
+              if previous is not None:
+
+                  difference = cv2.absdiff(
+                      gray,
+                      previous
+                  )
+
+                  score = float(
+                      np.mean(difference)
+                  )
+
+                  scores.append(
+                      (second, score)
+                  )
+
+              previous = gray
+
+              second += 1
+
+              if second >= duration:
+                  break
+
+          cap.release()
+
+
+          # ==========================================
+          # Find highest-motion section
+          # ==========================================
+
+          if not scores:
+
+              best_start = 0
+
+          else:
+
+              window = max(
+                  1,
+                  int(short_length)
+              )
+
+              best_start = 0
+              best_score = -1
+
+              for start in range(
+                  0,
+                  max(1, int(duration))
+              ):
+
+                  end = start + window
+
+                  total = sum(
+                      score
+                      for timestamp, score in scores
+                      if start <= timestamp < end
+                  )
+
+                  if total > best_score:
+
+                      best_score = total
+                      best_start = start
+
+
+          # ==========================================
+          # Don't exceed video duration
+          # ==========================================
+
+          if best_start + short_length > duration:
+
+              best_start = max(
+                  0,
+                  duration - short_length
+              )
+
+
+          print("================================")
+          print("BEST SECTION FOUND")
+          print("================================")
+          print(
+              f"Start: {best_start:.2f} seconds"
+          )
+          print(
+              f"Length: {short_length:.2f} seconds"
+          )
+
+
+          with open(
+              "best_section.txt",
+              "w"
+          ) as f:
+
+              f.write(
+                  str(best_start)
+              )
+
+          print("================================")
+
+          PY
+
+          python3 analyze_video.py
+
+
+      # ==========================================
+      # 10. Create YouTube Short
+      # ==========================================
+      - name: Create YouTube Short
+        run: |
+
+          START=$(cat best_section.txt)
+
+          echo "================================"
+          echo "CREATING YOUTUBE SHORT"
+          echo "================================"
+
+          echo "Best section starts at:"
+          echo "${START}s"
+
+          ffmpeg \
+            -y \
+            -ss "${START}" \
+            -i output/reel.mp4 \
+            -t 30 \
+            -c:v libx264 \
+            -preset veryfast \
+            -crf 20 \
+            -c:a aac \
+            -movflags +faststart \
+            output/youtube_short.mp4
+
+          echo "================================"
+          echo "YOUTUBE SHORT CREATED"
+          echo "================================"
+
+          ls -lh output/
+
+
+      # ==========================================
+      # 11. Check final Short
+      # ==========================================
+      - name: Check final Short
+        run: |
+
+          echo "================================"
+          echo "FINAL SHORT INFORMATION"
+          echo "================================"
+
+          ffprobe \
+            -v error \
+            -show_entries \
+            format=duration,size \
+            -of default=noprint_wrappers=1 \
+            output/youtube_short.mp4
+
+
+      # ==========================================
+      # 12. Install Gemini SDK
+      # ==========================================
+      - name: Install Gemini SDK
+        run: |
+          python3 -m pip install --upgrade google-genai
+
+
+      # ==========================================
+      # 13. Analyze Short with Gemini
+      # ==========================================
+      - name: Analyze Short with Gemini
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+        run: |
+
+          cat > gemini_analysis.py <<'PY'
+
+          import os
+          import json
+          import time
+          import re
+
+          from google import genai
+
+
+          print("================================")
+          print("GEMINI VIDEO ANALYSIS")
+          print("================================")
+
+
+          # ==========================================
+          # Check API key
+          # ==========================================
+
+          api_key = os.environ.get(
+              "GEMINI_API_KEY"
+          )
+
+          if not api_key:
+
+              raise RuntimeError(
+                  "GEMINI_API_KEY is not configured"
+              )
+
+
+          client = genai.Client(
+              api_key=api_key
+          )
+
+
+          video_path = (
+              "output/youtube_short.mp4"
+          )
+
+
+          # ==========================================
+          # Upload video
+          # ==========================================
+
+          print(
+              "Uploading video to Gemini..."
+          )
+
+          video_file = client.files.upload(
+              file=video_path
+          )
+
+          print(
+              f"Gemini file: {video_file.name}"
+          )
+
+
+          # ==========================================
+          # Wait for Gemini processing
+          # ==========================================
+
+          print(
+              "Waiting for Gemini to process video..."
+          )
+
+          while True:
+
+              video_file = client.files.get(
+                  name=video_file.name
+              )
+
+              state = (
+                  video_file.state.name
+                  if video_file.state
+                  else "UNKNOWN"
+              )
+
+              print(
+                  f"Video state: {state}"
+              )
+
+              if state == "ACTIVE":
+                  break
+
+              if state == "FAILED":
+
+                  raise RuntimeError(
+                      "Gemini failed to process the video"
+                  )
+
+              time.sleep(5)
+
+
+          # ==========================================
+          # SEO PROMPT
+          # ==========================================
+
+          prompt = """
+
+          You are an expert YouTube Shorts viral SEO strategist,
+          YouTube metadata specialist, and content growth strategist.
+
+          Analyze the uploaded video deeply before generating metadata.
+
+          Identify:
+
+          - Main subject
+          - People/person
+          - Action
+          - Dance/performance
+          - Song/music if identifiable
+          - Visible text
+          - Language
+          - Mood
+          - Context
+          - Audience
+          - Main topic
+          - Search intent
+          - Strongest hook
+          - Important searchable phrases
+
+          IMPORTANT:
+
+          Everything must be relevant to the actual video.
+
+          Never invent:
+          - celebrities
+          - song names
+          - locations
+          - events
+          - brands
+          - facts
+          - claims
+
+          that cannot reasonably be inferred from the video.
+
+
+          ========================================
+          RETURN ONLY VALID JSON
+          ========================================
+
+          Use exactly this structure:
+
+          {
+            "title": "",
+            "description": "",
+            "tags": "",
+            "hashtags": "",
+            "best_moment": "",
+            "category": "",
+            "keywords": ""
+          }
+
+
+          ========================================
+          TITLE
+          ========================================
+
+          Create ONE highly clickable YouTube Shorts title.
+
+          Requirements:
+
+          - Approximately 40-70 characters.
+          - Strong curiosity/hook.
+          - Accurate to the video.
+          - Natural language.
+          - SEO-friendly.
+          - Emojis allowed when appropriate.
+          - No hashtags in title.
+          - No misleading clickbait.
+          - Do not provide multiple title options.
+
+
+          ========================================
+          DESCRIPTION
+          ========================================
+
+          Create a strong SEO-optimized YouTube Shorts description.
+
+          Requirements:
+
+          - 2-4 engaging sentences.
+          - Explain what viewers are actually seeing.
+          - Naturally include important search keywords.
+          - Include relevant niche keywords.
+          - Include an engagement CTA.
+          - Do not keyword stuff.
+          - Do not repeat sentences.
+          - Do not put random hashtags in the main description.
+
+          After the main description, add:
+
+          [HASHTAG BLOCK]
+
+          The hashtag block must contain approximately
+          35-40 highly relevant hashtags generated specifically
+          for THIS video.
+
+          The hashtag block MUST include:
+
+          #Shorts
+          #YouTubeShorts
+
+          Then add relevant hashtags based on:
+
+          - Exact video topic
+          - Main subject
+          - Niche
+          - Content type
+          - Audience
+          - Dance/music/topic
+          - Indian/Hindi context when genuinely relevant
+          - Searchable topic variations
+
+          Do NOT use unrelated hashtags.
+
+
+          ========================================
+          HASHTAGS
+          ========================================
+
+          Generate approximately 35-40 hashtags.
+
+          Use a mixture of:
+
+          1. YouTube/Shorts hashtags
+          2. Broad niche hashtags
+          3. Exact niche hashtags
+          4. Topic-specific hashtags
+          5. Audience hashtags
+          6. Indian/Hindi hashtags when relevant
+          7. Search keyword variations
+
+          Rules:
+
+          - Target 35-40 hashtags.
+          - Minimum 35 whenever enough relevant hashtags exist.
+          - Every hashtag must start with #.
+          - No spaces inside hashtags.
+          - No duplicate hashtags.
+          - No unrelated hashtags.
+          - No misleading hashtags.
+          - Do not use random spam.
+          - Avoid generic hashtags such as #fyp,
+            #foryou, #foryoupage unless genuinely relevant.
+          - Prefer relevance over generic popularity.
+          - Include #Shorts.
+          - Include #YouTubeShorts.
+
+          Return all hashtags as ONE space-separated string.
+
+
+          ========================================
+          SEO TAGS
+          ========================================
+
+          Generate a strong YouTube SEO tag set.
+
+          TARGET LENGTH:
+
+          Approximately 400-500 characters.
+
+          IMPORTANT:
+
+          The complete comma-separated tags string
+          MUST be between 400 and 500 characters
+          whenever enough relevant keywords exist.
+
+          Use a mixture of:
+
+          - Exact main topic
+          - Exact subject
+          - Main keyword
+          - Long-tail keywords
+          - Search phrases
+          - Related keywords
+          - Synonyms
+          - Content type
+          - Audience keywords
+          - Shorts-related keywords
+          - Indian/Hindi keywords when relevant
+          - English keyword variations
+          - Common spelling variations
+          - Topic-specific search phrases
+
+          Rules:
+
+          - Target 400-500 characters.
+          - NEVER exceed 500 characters.
+          - Do not use unrelated viral keywords.
+          - Do not repeat identical tags.
+          - Keep tags highly relevant.
+          - Prioritize exact search intent.
+          - Return ONE comma-separated string.
+          - Do not add hashtags to the tags field.
+
+
+          ========================================
+          BEST MOMENT
+          ========================================
+
+          Identify the strongest moment/hook.
+
+          Include:
+
+          - Approximate timestamp
+          - What happens
+          - Why it is likely to retain viewers
+
+
+          ========================================
+          CATEGORY
+          ========================================
+
+          Choose the best YouTube category.
+
+          Examples:
+
+          Entertainment
+          Music
+          People & Blogs
+          Comedy
+          Sports
+          Howto & Style
+          Education
+
+          Return only the best category.
+
+
+          ========================================
+          KEYWORDS
+          ========================================
+
+          Generate 20-30 highly relevant searchable keywords.
+
+          Include:
+
+          - Primary keywords
+          - Secondary keywords
+          - Long-tail phrases
+          - Topic variations
+          - Audience search terms
+          - Relevant Indian/Hindi keywords when appropriate
+
+          Return comma-separated keywords.
+
+
+          ========================================
+          FINAL QUALITY CONTROL
+          ========================================
+
+          Before returning JSON:
+
+          1. Verify title is accurate.
+          2. Verify description is natural.
+          3. Verify approximately 35-40 hashtags.
+          4. Verify #Shorts is included.
+          5. Verify #YouTubeShorts is included.
+          6. Verify hashtags are relevant.
+          7. Verify no duplicate hashtags.
+          8. Verify SEO tags are approximately 400-500 characters.
+          9. NEVER exceed 500 characters for tags.
+          10. Verify tags are relevant.
+          11. Remove unrelated viral keywords.
+          12. Remove misleading hashtags.
+          13. Return ONLY valid JSON.
+
+          """
+
+
+          # ==========================================
+          # Send video to Gemini
+          # ==========================================
+
+          print(
+              "Sending video to Gemini..."
+          )
+
+          response = client.models.generate_content(
+              model="gemini-3.6-flash",
+              contents=[
+                  video_file,
+                  prompt
+              ]
+          )
+
+
+          text = response.text.strip()
+
+
+          # ==========================================
+          # Clean JSON response
+          # ==========================================
+
+          if text.startswith("```"):
+
+              text = text.replace(
+                  "```json",
+                  ""
+              )
+
+              text = text.replace(
+                  "```",
+                  ""
+              )
+
+              text = text.strip()
+
+
+          try:
+
+              data = json.loads(text)
+
+          except json.JSONDecodeError as e:
+
+              print(
+                  "Gemini returned invalid JSON."
+              )
+
+              print(text)
+
+              raise e
+
+
+          # ==========================================
+          # Clean hashtags
+          # ==========================================
+
+          hashtags = data.get(
+              "hashtags",
+              ""
+          )
+
+          if isinstance(
+              hashtags,
+              list
+          ):
+
+              hashtags = " ".join(
+                  str(x)
+                  for x in hashtags
+              )
+
+          hashtags = str(
+              hashtags
+          ).strip()
+
+
+          # Remove duplicate hashtags
+          hashtag_tokens = hashtags.split()
+
+          unique_hashtags = []
+          seen_hashtags = set()
+
+          for hashtag in hashtag_tokens:
+
+              hashtag = hashtag.strip()
+
+              if not hashtag:
+                  continue
+
+              if not hashtag.startswith("#"):
+                  hashtag = "#" + hashtag
+
+              key = hashtag.lower()
+
+              if key not in seen_hashtags:
+
+                  seen_hashtags.add(key)
+
+                  unique_hashtags.append(
+                      hashtag
+                  )
+
+
+          # Make sure mandatory hashtags exist
+          mandatory_hashtags = [
+              "#Shorts",
+              "#YouTubeShorts"
+          ]
+
+          for hashtag in mandatory_hashtags:
+
+              if hashtag.lower() not in seen_hashtags:
+
+                  unique_hashtags.insert(
+                      0,
+                      hashtag
+                  )
+
+                  seen_hashtags.add(
+                      hashtag.lower()
+                  )
+
+
+          # Keep approximately 40
+          unique_hashtags = unique_hashtags[:40]
+
+          data["hashtags"] = " ".join(
+              unique_hashtags
+          )
+
+
+          # ==========================================
+          # Clean SEO Tags
+          # YouTube-safe SEO keywords
+          # Maximum 500 characters
+          # ==========================================
+
+          import re
+
+          tags = data.get("tags", "")
+
+          if isinstance(tags, str):
+              raw_tags = [
+                  tag.strip()
+                  for tag in tags.split(",")
+                  if tag.strip()
+              ]
+          elif isinstance(tags, list):
+              raw_tags = [
+                  str(tag).strip()
+                  for tag in tags
+                  if str(tag).strip()
+              ]
+          else:
+              raw_tags = []
+
+          final_tags = []
+          seen_tags = set()
+          current_length = 0
+
+          for tag in raw_tags:
+
+              tag = str(tag).strip()
+
+              if not tag:
+                  continue
+
+              # Remove # symbols
+              tag = tag.replace("#", " ")
+
+              # Remove URLs
+              tag = re.sub(
+                  r"https?://\S+|www\.\S+",
+                  " ",
+                  tag,
+                  flags=re.IGNORECASE
+              )
+
+              # Keep only letters, numbers and spaces
+              # This removes emojis and problematic punctuation
+              tag = re.sub(
+                  r"[^A-Za-z0-9\s]",
+                  " ",
+                  tag
+              )
+
+              # Normalize multiple spaces
+              tag = re.sub(
+                  r"\s+",
+                  " ",
+                  tag
+              ).strip()
+
+              if not tag:
+                  continue
+
+              # Keep tags reasonably short
+              tag = tag[:60].strip()
+
+              key = tag.lower()
+
+              if key in seen_tags:
+                  continue
+
+              extra_length = len(tag)
+
+              if final_tags:
+                  extra_length += 1
+
+              # Keep safely below YouTube's 500-character limit
+              if current_length + extra_length > 490:
+                  break
+
+              final_tags.append(tag)
+              seen_tags.add(key)
+              current_length += extra_length
+
+          data["tags"] = ",".join(final_tags)
+          # ==========================================
+          # Improve description
+          # ==========================================
+
+          description = data.get(
+              "description",
+              ""
+          )
+
+          description = str(
+              description
+          ).strip()
+
+
+          # Remove an accidentally generated hashtag block
+          # because we will append our cleaned block.
+          if "[HASHTAG BLOCK]" in description:
+
+              description = description.split(
+                  "[HASHTAG BLOCK]"
+              )[0].strip()
+
+
+          hashtag_block = data["hashtags"]
+
+          data["description"] = (
+              description
+              + "\n\n"
+              + hashtag_block
+          ).strip()
+
+
+          # ==========================================
+          # Statistics
+          # ==========================================
+
+          hashtag_count = len(
+              data["hashtags"].split()
+          )
+
+          tag_length = len(
+              data["tags"]
+          )
+
+          print("================================")
+          print("METADATA QUALITY CHECK")
+          print("================================")
+
+          print(
+              f"Hashtag count: {hashtag_count}"
+          )
+
+          print(
+              f"SEO tag characters: {tag_length}"
+          )
+
+          print(
+              f"Title: {data.get('title', '')}"
+          )
+
+          print("================================")
+
+
+          if hashtag_count < 35:
+
+              print(
+                  "WARNING: Fewer than 35 hashtags generated."
+              )
+
+
+          if tag_length > 500:
+
+              print(
+                  "WARNING: SEO tags exceeded 500 characters."
+              )
+
+              data["tags"] = data["tags"][:500]
+
+
+          # ==========================================
+          # Save metadata
+          # ==========================================
+
+          os.makedirs(
+              "output",
+              exist_ok=True
+          )
+
+          with open(
+              "output/metadata.json",
+              "w",
+              encoding="utf-8"
+          ) as f:
+
+              json.dump(
+                  data,
+                  f,
+                  ensure_ascii=False,
+                  indent=2
+              )
+
+
+          print("================================")
+          print("GEMINI ANALYSIS COMPLETE")
+          print("================================")
+
+          print(
+              json.dumps(
+                  data,
+                  ensure_ascii=False,
+                  indent=2
+              )
+          )
+
+          PY
+
+          python3 gemini_analysis.py
+
+
+      # ==========================================
+      # 14. Check generated metadata
+      # ==========================================
+      - name: Check generated metadata
+        run: |
+
+          echo "================================"
+          echo "GENERATED YOUTUBE METADATA"
+          echo "================================"
+
+          cat output/metadata.json
+
+          echo ""
+          echo "================================"
+
+
+      # ==========================================
+      # 15. Install YouTube API libraries
+      # ==========================================
+      - name: Install YouTube API libraries
+        run: |
+
+          python3 -m pip install --upgrade \
+            google-api-python-client \
+            google-auth \
+            google-auth-oauthlib
+
+
+      # ==========================================
+      # 16. Restore YouTube OAuth token
+      # ==========================================
+      - name: Restore YouTube OAuth token
+        env:
+          YOUTUBE_TOKEN: ${{ secrets.YOUTUBE_TOKEN }}
+
+        run: |
+
+          echo "================================"
+          echo "RESTORING YOUTUBE TOKEN"
+          echo "================================"
+
+          if [ -z "$YOUTUBE_TOKEN" ]; then
+
+            echo "ERROR: YOUTUBE_TOKEN secret is empty."
+
+            exit 1
+
+          fi
+
+
+          echo "$YOUTUBE_TOKEN" | base64 -d > youtube_token.json
+
+
+          python3 - <<'PY'
+
+          import json
+
+          with open(
+              "youtube_token.json",
+              "r",
+              encoding="utf-8"
+          ) as f:
+
+              data = json.load(f)
+
+
+          required = [
+              "token",
+              "refresh_token",
+              "client_id",
+              "client_secret"
+          ]
+
+
+          missing = [
+              item
+              for item in required
+              if not data.get(item)
+          ]
+
+
+          if missing:
+
+              raise RuntimeError(
+                  "YouTube token is missing: "
+                  + ", ".join(missing)
+              )
+
+
+          print(
+              "YouTube OAuth token restored successfully."
+          )
+
+          PY
+
+
+            # ==========================================
+      # 17. Upload Short to YouTube
+      # ==========================================
+      - name: Upload Short to YouTube
+        run: |
+
+          cat > upload_youtube.py <<'PY'
+
+          import json
+          import re
+          import time
+
+          from google.oauth2.credentials import Credentials
+          from googleapiclient.discovery import build
+          from googleapiclient.http import MediaFileUpload
+          from googleapiclient.errors import HttpError
+
+
+          print("================================")
+          print("YOUTUBE UPLOAD")
+          print("================================")
+
+
+          # ==========================================
+          # Load OAuth token
+          # ==========================================
+
+          with open(
+              "youtube_token.json",
+              "r",
+              encoding="utf-8"
+          ) as f:
+
+              token_data = json.load(f)
+
+
+          credentials = Credentials.from_authorized_user_info(
+              token_data
+          )
+
+
+          # ==========================================
+          # Build YouTube API
+          # ==========================================
+
+          youtube = build(
+              "youtube",
+              "v3",
+              credentials=credentials
+          )
+
+
+          # ==========================================
+          # Load Gemini metadata
+          # ==========================================
+
+          with open(
+              "output/metadata.json",
+              "r",
+              encoding="utf-8"
+          ) as f:
+
+              metadata = json.load(f)
+
+
+          # ==========================================
+          # TITLE
+          # ==========================================
+
+          title = metadata.get(
+              "title",
+              "ReelToTube Short"
+          )
+
+          title = str(title).strip()[:100]
+
+
+          # ==========================================
+          # DESCRIPTION
+          # ==========================================
+
+          description = metadata.get(
+              "description",
+              ""
+          )
+
+          description = str(
+              description
+          ).strip()
+
+
+          # ==========================================
+          # HASHTAGS
+          # ==========================================
+
+          hashtags = metadata.get(
+              "hashtags",
+              []
+          )
+
+
+          if isinstance(hashtags, list):
+
+              hashtag_list = [
+                  str(x).strip()
+                  for x in hashtags
+                  if str(x).strip()
+              ]
+
+          else:
+
+              hashtag_list = [
+                  x.strip()
+                  for x in str(hashtags).split()
+                  if x.strip()
+              ]
+
+
+          clean_hashtags = []
+
+          seen_hashtags = set()
+
+
+          for hashtag in hashtag_list:
+
+              # Keep only valid hashtag characters.
+              hashtag = re.sub(
+                  r"[^A-Za-z0-9_#]",
+                  "",
+                  hashtag
+              )
+
+              if not hashtag:
+                  continue
+
+              if not hashtag.startswith("#"):
+                  hashtag = "#" + hashtag
+
+              key = hashtag.lower()
+
+              if key not in seen_hashtags:
+
+                  clean_hashtags.append(
+                      hashtag
+                  )
+
+                  seen_hashtags.add(
+                      key
+                  )
+
+
+          # ==========================================
+          # Mandatory hashtags
+          # ==========================================
+
+          mandatory_hashtags = [
+              "#Shorts",
+              "#YouTubeShorts"
+          ]
+
+
+          for hashtag in mandatory_hashtags:
+
+              key = hashtag.lower()
+
+              if key not in seen_hashtags:
+
+                  clean_hashtags.insert(
+                      0,
+                      hashtag
+                  )
+
+                  seen_hashtags.add(
+                      key
+                  )
+
+
+          clean_hashtags = clean_hashtags[:40]
+
+
+          hashtags_text = " ".join(
+              clean_hashtags
+          )
+
+
+          # ==========================================
+          # Add hashtags to description
+          # ==========================================
+
+          if hashtags_text:
+
+              if hashtags_text.lower() not in description.lower():
+
+                  description = (
+                      description.rstrip()
+                      + "\n\n"
+                      + hashtags_text
+                  )
+
+
+          # ==========================================
+          # SEO TAGS
+          # ==========================================
+
+          tags_data = metadata.get(
+              "tags",
+              []
+          )
+
+
+          if isinstance(
+              tags_data,
+              str
+          ):
+
+              raw_tags = [
+                  x.strip()
+                  for x in tags_data.split(",")
+                  if x.strip()
+              ]
+
+          elif isinstance(
+              tags_data,
+              list
+          ):
+
+              raw_tags = [
+                  str(x).strip()
+                  for x in tags_data
+                  if str(x).strip()
+              ]
+
+          else:
+
+              raw_tags = []
+
+
+          # ==========================================
+          # FINAL YOUTUBE-SAFE SEO TAG SANITIZER
+          # ==========================================
+
+          final_tags = []
+
+          seen_tags = set()
+
+          current_length = 0
+
+
+          for tag in raw_tags:
+
+              tag = str(tag).strip()
+
+
+              if not tag:
+                  continue
+
+
+              # Remove hashtags.
+              tag = tag.replace(
+                  "#",
+                  " "
+              )
+
+
+              # Remove URLs.
+              tag = re.sub(
+                  r"https?://\S+|www\.\S+",
+                  " ",
+                  tag,
+                  flags=re.IGNORECASE
+              )
+
+
+              # Remove punctuation, symbols and emojis.
+              # Keep only ASCII letters, numbers and spaces.
+              tag = re.sub(
+                  r"[^A-Za-z0-9\s]",
+                  " ",
+                  tag
+              )
+
+
+              # Normalize whitespace.
+              tag = re.sub(
+                  r"\s+",
+                  " ",
+                  tag
+              ).strip()
+
+
+              if not tag:
+                  continue
+
+
+              # Maximum individual tag length.
+              tag = tag[:60].strip()
+
+
+              key = tag.lower()
+
+
+              # Remove duplicate tags.
+              if key in seen_tags:
+                  continue
+
+
+              extra_length = len(tag)
+
+
+              if final_tags:
+                  extra_length += 1
+
+
+              # Stay safely below YouTube's 500-character limit.
+              if (
+                  current_length
+                  + extra_length
+                  > 490
+              ):
+                  break
+
+
+              final_tags.append(
+                  tag
+              )
+
+              seen_tags.add(
+                  key
+              )
+
+              current_length += extra_length
+
+
+          # ==========================================
+          # CATEGORY
+          # ==========================================
+
+          category_id = "22"
+
+
+          # ==========================================
+          # DEBUG INFORMATION
+          # ==========================================
+
+          print("================================")
+          print("VIDEO METADATA")
+          print("================================")
+
+          print(
+              "Title:"
+          )
+
+          print(
+              title
+          )
+
+          print(
+              "Description characters:",
+              len(description)
+          )
+
+          print(
+              "Hashtag count:",
+              len(clean_hashtags)
+          )
+
+          print(
+              "SEO tag count:",
+              len(final_tags)
+          )
+
+          print(
+              "SEO tag characters:",
+              len(",".join(final_tags))
+          )
+
+          print(
+              "Clean SEO tags:"
+          )
+
+          print(
+              ",".join(final_tags)
+          )
+
+          print("================================")
+
+
+          # ==========================================
+          # UPLOAD FUNCTION
+          # ==========================================
+
+          def upload_video(
+              tags_to_use
+          ):
+
+              upload_body = {
+
+                  "snippet": {
+
+                      "title": title,
+
+                      "description": description,
+
+                      "tags": tags_to_use,
+
+                      "categoryId": category_id
+
+                  },
+
+                  "status": {
+
+                      # Keep PRIVATE for testing.
+                      "privacyStatus": "private",
+
+                      "selfDeclaredMadeForKids": False
+
+                  }
+
+              }
+
+
+              media = MediaFileUpload(
+
+                  "output/youtube_short.mp4",
+
+                  mimetype="video/mp4",
+
+                  resumable=True
+
+              )
+
+
+              request = youtube.videos().insert(
+
+                  part="snippet,status",
+
+                  body=upload_body,
+
+                  media_body=media
+
+              )
+
+
+              return request.execute()
+
+
+          # ==========================================
+          # UPLOAD WITH RETRIES
+          # ==========================================
+
+          print(
+              "UPLOADING SHORT TO YOUTUBE..."
+          )
+
+
+          response = None
+
+          max_attempts = 5
+
+
+          for attempt in range(
+              1,
+              max_attempts + 1
+          ):
+
+              try:
+
+                  print(
+                      f"Upload attempt "
+                      f"{attempt}/{max_attempts}"
+                  )
+
+
+                  response = upload_video(
+                      final_tags
+                  )
+
+
+                  break
+
+
+              except HttpError as error:
+
+                  status = getattr(
+                      error.resp,
+                      "status",
+                      None
+                  )
+
+
+                  error_text = str(
+                      error
+                  )
+
+
+                  print(
+                      f"YouTube API error: "
+                      f"HTTP {status}"
+                  )
+
+                  print(
+                      error_text
+                  )
+
+
+                  # ==========================================
+                  # INVALID TAGS FALLBACK
+                  # ==========================================
+
+                  if (
+                      status == 400
+                      and
+                      "invalidTags"
+                      in error_text
+                  ):
+
+                      print(
+                          "================================"
+                      )
+
+                      print(
+                          "YOUTUBE REJECTED SEO TAGS"
+                      )
+
+                      print(
+                          "Retrying WITHOUT SEO tags..."
+                      )
+
+                      print(
+                          "================================"
+                      )
+
+
+                      response = upload_video(
+                          []
+                      )
+
+
+                      print(
+                          "Upload succeeded "
+                          "without SEO tags."
+                      )
+
+
+                      break
+
+
+                  # ==========================================
+                  # TEMPORARY SERVER ERROR
+                  # ==========================================
+
+                  if status in [
+                      500,
+                      502,
+                      503,
+                      504
+                  ]:
+
+                      if attempt < max_attempts:
+
+                          wait_time = (
+                              attempt * 5
+                          )
+
+
+                          print(
+                              "Temporary error."
+                          )
+
+
+                          print(
+                              f"Retrying in "
+                              f"{wait_time} seconds..."
+                          )
+
+
+                          time.sleep(
+                              wait_time
+                          )
+
+
+                          continue
+
+
+                  # Any other error should stop.
+                  raise
+
+
+          if not response:
+
+              raise RuntimeError(
+                  "YouTube upload failed."
+              )
+
+
+          # ==========================================
+          # GET UPLOAD RESULT
+          # ==========================================
+
+          video_id = response.get(
+              "id"
+          )
+
+
+          if not video_id:
+
+              raise RuntimeError(
+                  "YouTube returned "
+                  "no video ID."
+              )
+
+
+          video_url = (
+              "https://www.youtube.com/watch?v="
+              + video_id
+          )
+
+
+          # ==========================================
+          # CHANNEL INFORMATION
+          # ==========================================
+
+          response_snippet = response.get(
+              "snippet",
+              {}
+          )
+
+
+          channel_id = (
+              response_snippet.get(
+                  "channelId",
+                  ""
+              )
+          )
+
+
+          channel_name = (
+              response_snippet.get(
+                  "channelTitle",
+                  ""
+              )
+          )
+
+
+          # ==========================================
+          # SUCCESS
+          # ==========================================
+
+          print("================================")
+          print("YOUTUBE UPLOAD SUCCESS")
+          print("================================")
+
+
+          print(
+              "Channel:",
+              channel_name
+          )
+
+
+          print(
+              "Channel ID:",
+              channel_id
+          )
+
+
+          print(
+              "Video ID:",
+              video_id
+          )
+
+
+          print(
+              "YouTube URL:",
+              video_url
+          )
+
+
+          print(
+              "Privacy:",
+              "PRIVATE"
+          )
+
+
+          print(
+              "SEO tags:",
+              len(final_tags)
+          )
+
+
+          print("================================")
+
+
+          # ==========================================
+          # SAVE RESULT
+          # ==========================================
+
+          result = {
+
+              "status": "uploaded",
+
+              "video_id": video_id,
+
+              "url": video_url,
+
+              "title": title,
+
+              "channel": channel_name,
+
+              "channel_id": channel_id,
+
+              "privacy": "private",
+
+              "hashtag_count": len(
+                  clean_hashtags
+              ),
+
+              "seo_tag_count": len(
+                  final_tags
+              ),
+
+              "seo_tag_characters": len(
+                  ",".join(final_tags)
+              )
+
+          }
+
+
+          with open(
+
+              "output/youtube_result.json",
+
+              "w",
+
+              encoding="utf-8"
+
+          ) as f:
+
+              json.dump(
+
+                  result,
+
+                  f,
+
+                  ensure_ascii=False,
+
+                  indent=2
+
+              )
+
+
+          print(
+              "YouTube result saved."
+          )
+
+
+          print(
+              "================================"
+          )
+
+
+          PY
+
+
+          python3 upload_youtube.py
+
+
+      # ==========================================
+      # 18. Check YouTube result
+      # ==========================================
+      - name: Check YouTube upload result
+        run: |
+
+          echo "================================"
+          echo "YOUTUBE UPLOAD RESULT"
+          echo "================================"
+
+          cat output/youtube_result.json
+
+          echo ""
+          echo "================================"
+
+
+      # ==========================================
+      # 19. Upload artifacts
+      # ==========================================
+      - name: Upload processed videos and metadata
+        uses: actions/upload-artifact@v4
+
+        with:
+
+          name: ReelToTube-Processed
+
+          path: |
+
+            output/reel.mp4
+            output/youtube_short.mp4
+            output/metadata.json
+            output/youtube_result.json
+
+          retention-days: 3
+
+
+      # ==========================================
+      # 20. Success
+      # ==========================================
+      - name: Test successful
+        run: |
+
+          echo "================================"
+          echo "REELTOTUBE PROCESSOR SUCCESS"
+          echo "================================"
+
+          echo "Instagram Reel downloaded"
+          echo "Best section detected"
+          echo "YouTube Short created"
+          echo "Gemini SEO metadata generated"
+          echo "35-40 hashtag target applied"
+          echo "400-500 character SEO tag target applied"
+          echo "YouTube upload completed"
+          echo "Processed files uploaded"
+
+          echo "================================"
