@@ -49,7 +49,6 @@ jobs:
           RUN_ID: ${{ inputs.run_id }}
 
         run: |
-
           echo "=========================================="
           echo "       DOWNLOADING REVIEW PACKAGE"
           echo "=========================================="
@@ -82,21 +81,8 @@ jobs:
       # ============================================================
       # 4. NORMALIZE REVIEW PACKAGE
       # ============================================================
-      # GitHub artifact currently downloads like:
-      #
-      # review/output/youtube_short.mp4
-      # review/output/metadata.json
-      #
-      # This step copies them into:
-      #
-      # review/youtube_short.mp4
-      # review/metadata.json
-      #
-      # so the rest of the workflow always uses one fixed path.
-      # ============================================================
       - name: Normalize review package
         run: |
-
           echo "=========================================="
           echo "       NORMALIZING REVIEW PACKAGE"
           echo "=========================================="
@@ -108,7 +94,6 @@ jobs:
             echo ""
             echo "ERROR: youtube_short.mp4 was not found."
             echo ""
-            echo "Searching entire review directory:"
             find review -type f -print
             exit 1
           fi
@@ -117,7 +102,6 @@ jobs:
             echo ""
             echo "ERROR: metadata.json was not found."
             echo ""
-            echo "Searching entire review directory:"
             find review -type f -print
             exit 1
           fi
@@ -127,14 +111,11 @@ jobs:
 
           echo ""
           echo "Normalized files:"
-          echo "=========================================="
-
           ls -lh review/youtube_short.mp4
           ls -lh review/metadata.json
 
           echo ""
           echo "Review package is ready."
-          echo "=========================================="
 
 
       # ============================================================
@@ -142,7 +123,6 @@ jobs:
       # ============================================================
       - name: Check review package
         run: |
-
           echo "=========================================="
           echo "       CHECKING REVIEW PACKAGE"
           echo "=========================================="
@@ -176,7 +156,6 @@ jobs:
       # ============================================================
       - name: Install YouTube API dependencies
         run: |
-
           python3 -m pip install --upgrade pip
 
           python3 -m pip install \
@@ -191,150 +170,70 @@ jobs:
       # ============================================================
       - name: Prepare YouTube metadata
         run: |
-
           python3 - <<'PY'
-
           import json
           import re
-
 
           INPUT_FILE = "review/metadata.json"
           OUTPUT_FILE = "review/youtube_upload.json"
 
-
-          # ==========================================================
-          # LOAD METADATA
-          # ==========================================================
-
-          with open(
-              INPUT_FILE,
-              "r",
-              encoding="utf-8"
-          ) as f:
-
+          with open(INPUT_FILE, "r", encoding="utf-8") as f:
               data = json.load(f)
 
-
-          title = str(
-              data.get("title", "")
-          ).strip()
-
-
-          description = str(
-              data.get("description", "")
-          ).strip()
-
-
-          category = str(
-              data.get("category", "")
-          ).strip()
-
-
-          raw_tags = data.get(
-              "tags",
-              ""
-          )
-
+          title = str(data.get("title", "")).strip()
+          description = str(data.get("description", "")).strip()
+          category = str(data.get("category", "")).strip()
+          raw_tags = data.get("tags", "")
 
           # ==========================================================
-          # VALIDATE TITLE
+          # TITLE
           # ==========================================================
-
           if not title:
+              raise RuntimeError("YouTube title is empty.")
 
-              raise RuntimeError(
-                  "YouTube title is empty."
-              )
-
-
-          # YouTube title maximum is 100 characters.
           title = title[:100]
 
-
           # ==========================================================
-          # VALIDATE DESCRIPTION
+          # DESCRIPTION
           # ==========================================================
-
           if not description:
-
-              raise RuntimeError(
-                  "YouTube description is empty."
-              )
-
+              raise RuntimeError("YouTube description is empty.")
 
           # ==========================================================
           # CATEGORY
           # ==========================================================
-
           category_map = {
-
               "Music": "10",
-
               "Entertainment": "24",
-
               "People & Blogs": "22",
-
               "Comedy": "23",
-
               "Sports": "17",
-
               "Howto & Style": "26",
-
               "Education": "27"
           }
 
-
-          category_id = category_map.get(
-              category,
-              "24"
-          )
-
+          category_id = category_map.get(category, "24")
 
           # ==========================================================
-          # CONVERT TAGS TO LIST
+          # TAGS
           # ==========================================================
-
           if isinstance(raw_tags, str):
-
               raw_tags = raw_tags.split(",")
-
-          elif isinstance(raw_tags, list):
-
-              raw_tags = raw_tags
-
-          else:
-
+          elif not isinstance(raw_tags, list):
               raw_tags = []
 
-
-          # ==========================================================
-          # CLEAN YOUTUBE TAGS
-          # ==========================================================
-
           clean_tags = []
-
           seen = set()
-
           total_length = 0
 
-
           for item in raw_tags:
-
               tag = str(item).strip()
-
 
               if not tag:
                   continue
 
+              tag = tag.replace("#", " ")
 
-              # Remove hashtags.
-              tag = tag.replace(
-                  "#",
-                  " "
-              )
-
-
-              # Remove URLs.
               tag = re.sub(
                   r"https?://\S+|www\.\S+",
                   " ",
@@ -342,108 +241,63 @@ jobs:
                   flags=re.IGNORECASE
               )
 
-
-              # Remove control characters.
               tag = re.sub(
                   r"[\x00-\x1F\x7F]",
                   " ",
                   tag
               )
 
-
-              # Keep letters, numbers and spaces.
-              # This avoids malformed YouTube keywords.
               tag = re.sub(
                   r"[^A-Za-z0-9\s]",
                   " ",
                   tag
               )
 
-
-              # Normalize spaces.
               tag = re.sub(
                   r"\s+",
                   " ",
                   tag
               ).strip()
 
-
               if not tag:
                   continue
 
-
-              # Keep individual tags reasonably short.
               tag = tag[:60].strip()
-
-
-              if not tag:
-                  continue
-
 
               key = tag.lower()
 
-
-              # Remove duplicates.
               if key in seen:
                   continue
 
-
-              # YouTube total tag limit is 500 characters.
               extra_length = len(tag)
 
               if clean_tags:
                   extra_length += 1
 
-
-              # Stay safely below the limit.
               if total_length + extra_length > 450:
                   break
 
-
               clean_tags.append(tag)
-
               seen.add(key)
-
               total_length += extra_length
 
+          final_tags = ",".join(clean_tags)
 
-          # ==========================================================
-          # FINAL TAG STRING
-          # ==========================================================
-
-          final_tags = ",".join(
-              clean_tags
-          )
-
-
-          # Absolute safety check.
           if len(final_tags) > 500:
-
               final_tags = final_tags[:500]
 
-
-          # ==========================================================
-          # CREATE OUTPUT
-          # ==========================================================
-
           output = {
-
               "title": title,
-
               "description": description,
-
               "tags": clean_tags,
-
               "category_id": category_id
           }
-
 
           with open(
               OUTPUT_FILE,
               "w",
               encoding="utf-8"
           ) as f:
-
               json.dump(
                   output,
                   f,
@@ -451,65 +305,54 @@ jobs:
                   indent=2
               )
 
-
-          # ==========================================================
-          # DEBUG
-          # ==========================================================
-
           print("")
           print("==========================================")
           print("       YOUTUBE UPLOAD METADATA")
           print("==========================================")
-
           print("")
           print("TITLE:")
           print(title)
-
           print("")
           print("CATEGORY:")
           print(category)
-
           print("")
           print("CATEGORY ID:")
           print(category_id)
-
           print("")
           print("DESCRIPTION CHARACTERS:")
           print(len(description))
-
           print("")
           print("SEO TAG COUNT:")
           print(len(clean_tags))
-
           print("")
           print("SEO TAG CHARACTERS:")
           print(len(final_tags))
-
           print("")
           print("SEO TAGS:")
           print(final_tags)
-
           print("")
           print("==========================================")
           print("       METADATA READY")
           print("==========================================")
-
           PY
 
 
-           # ============================================================
+      # ============================================================
       # 8. UPLOAD SHORT TO YOUTUBE
       # ============================================================
       - name: Upload Short to YouTube
+
         env:
           YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+
         run: |
+
           cat > upload_youtube.py <<'PY'
+
           import os
           import json
-          import time
 
           from google.oauth2.credentials import Credentials
           from google.auth.transport.requests import Request
@@ -518,9 +361,9 @@ jobs:
           from googleapiclient.errors import HttpError
 
 
-          # ============================================================
+          # ==========================================================
           # CONFIG
-          # ============================================================
+          # ==========================================================
 
           CLIENT_ID = os.environ.get("YOUTUBE_CLIENT_ID")
           CLIENT_SECRET = os.environ.get("YOUTUBE_CLIENT_SECRET")
@@ -529,10 +372,15 @@ jobs:
           VIDEO_FILE = "review/youtube_short.mp4"
           METADATA_FILE = "review/youtube_upload.json"
 
+          # IMPORTANT:
+          # This is the SAME filename used by the Summary
+          # and Save Upload Result steps.
+          RESULT_FILE = "review/upload_result.json"
 
-          # ============================================================
+
+          # ==========================================================
           # CHECK SECRETS
-          # ============================================================
+          # ==========================================================
 
           if not CLIENT_ID:
               raise RuntimeError(
@@ -550,9 +398,9 @@ jobs:
               )
 
 
-          # ============================================================
+          # ==========================================================
           # CHECK FILES
-          # ============================================================
+          # ==========================================================
 
           print("")
           print("==========================================")
@@ -580,9 +428,9 @@ jobs:
           print(f"Metadata found: {METADATA_FILE}")
 
 
-          # ============================================================
+          # ==========================================================
           # LOAD METADATA
-          # ============================================================
+          # ==========================================================
 
           with open(
               METADATA_FILE,
@@ -591,13 +439,18 @@ jobs:
           ) as f:
               metadata = json.load(f)
 
-
           title = str(
-              metadata.get("title", "YouTube Short")
+              metadata.get(
+                  "title",
+                  "YouTube Short"
+              )
           ).strip()
 
           description = str(
-              metadata.get("description", "")
+              metadata.get(
+                  "description",
+                  ""
+              )
           ).strip()
 
           tags = metadata.get(
@@ -606,22 +459,23 @@ jobs:
           )
 
           category_id = str(
-              metadata.get("category_id", "22")
+              metadata.get(
+                  "category_id",
+                  "22"
+              )
           )
 
 
-          # ============================================================
+          # ==========================================================
           # FINAL TAG SAFETY
-          # ============================================================
+          # ==========================================================
 
           if not isinstance(tags, list):
               tags = []
 
-
           safe_tags = []
           total_length = 0
           seen = set()
-
 
           for tag in tags:
 
@@ -630,13 +484,9 @@ jobs:
               if not tag:
                   continue
 
-              # Remove hashtag symbols.
               tag = tag.replace("#", " ")
-
-              # Remove commas.
               tag = tag.replace(",", " ")
 
-              # Normalize spaces.
               tag = " ".join(
                   tag.split()
               )
@@ -644,7 +494,6 @@ jobs:
               if not tag:
                   continue
 
-              # YouTube individual tag safety.
               tag = tag[:60]
 
               key = tag.lower()
@@ -657,7 +506,6 @@ jobs:
               if safe_tags:
                   extra += 1
 
-              # Keep safely below YouTube's tag character limit.
               if total_length + extra > 450:
                   break
 
@@ -665,13 +513,12 @@ jobs:
               seen.add(key)
               total_length += extra
 
-
           tags = safe_tags
 
 
-          # ============================================================
+          # ==========================================================
           # CREATE OAUTH CREDENTIALS
-          # ============================================================
+          # ==========================================================
 
           print("")
           print("Creating YouTube OAuth credentials...")
@@ -688,9 +535,9 @@ jobs:
           )
 
 
-          # ============================================================
+          # ==========================================================
           # REFRESH ACCESS TOKEN
-          # ============================================================
+          # ==========================================================
 
           print("Refreshing YouTube access token...")
 
@@ -707,9 +554,11 @@ jobs:
               print("YOUTUBE OAUTH ERROR")
               print("==========================================")
               print("")
+
               print(
                   "The YouTube refresh token could not be refreshed."
               )
+
               print("")
               print(
                   "Make sure YOUTUBE_CLIENT_ID, "
@@ -717,13 +566,10 @@ jobs:
                   "YOUTUBE_REFRESH_TOKEN all belong "
                   "to the SAME Google OAuth client."
               )
+
               print("")
-              print(
-                  "Original error:"
-              )
-              print(
-                  repr(e)
-              )
+              print("Original error:")
+              print(repr(e))
               print("")
 
               raise RuntimeError(
@@ -733,13 +579,14 @@ jobs:
                   "a different OAuth client."
               )
 
+          print(
+              "YouTube access token refreshed successfully."
+          )
 
-          print("YouTube access token refreshed successfully.")
 
-
-          # ============================================================
+          # ==========================================================
           # BUILD YOUTUBE CLIENT
-          # ============================================================
+          # ==========================================================
 
           youtube = build(
               "youtube",
@@ -748,9 +595,9 @@ jobs:
           )
 
 
-          # ============================================================
+          # ==========================================================
           # SHOW UPLOAD INFORMATION
-          # ============================================================
+          # ==========================================================
 
           print("")
           print("Title:")
@@ -769,9 +616,9 @@ jobs:
           print(VIDEO_FILE)
 
 
-          # ============================================================
+          # ==========================================================
           # YOUTUBE UPLOAD BODY
-          # ============================================================
+          # ==========================================================
 
           body = {
               "snippet": {
@@ -787,9 +634,9 @@ jobs:
           }
 
 
-          # ============================================================
+          # ==========================================================
           # MEDIA FILE
-          # ============================================================
+          # ==========================================================
 
           media = MediaFileUpload(
               VIDEO_FILE,
@@ -798,9 +645,9 @@ jobs:
           )
 
 
-          # ============================================================
+          # ==========================================================
           # UPLOAD
-          # ============================================================
+          # ==========================================================
 
           print("")
           print("==========================================")
@@ -865,17 +712,29 @@ jobs:
               # ========================================================
               # SAVE RESULT
               # ========================================================
+              #
+              # IMPORTANT:
+              # The old code saved:
+              #     youtube_upload_result.json
+              #
+              # But the next step expected:
+              #     upload_result.json
+              #
+              # We now save the correct filename.
+              # ========================================================
 
               result = {
                   "success": True,
                   "video_id": video_id,
-                  "video_url": video_url,
-                  "title": title
+                  "url": video_url,
+                  "title": title,
+                  "privacy": "public",
+                  "seo_tag_count": len(tags)
               }
 
 
               with open(
-                  "review/youtube_upload_result.json",
+                  RESULT_FILE,
                   "w",
                   encoding="utf-8"
               ) as f:
@@ -888,6 +747,18 @@ jobs:
                   )
 
 
+              print("")
+              print(
+                  f"Upload result saved: {RESULT_FILE}"
+              )
+
+              print("")
+              print(
+                  "Upload result file exists:",
+                  os.path.isfile(RESULT_FILE)
+              )
+
+
           except HttpError as e:
 
               print("")
@@ -895,6 +766,7 @@ jobs:
               print("        YOUTUBE API ERROR")
               print("==========================================")
               print("")
+
               print(
                   f"HTTP error: {e}"
               )
@@ -909,6 +781,7 @@ jobs:
               print("        YOUTUBE UPLOAD ERROR")
               print("==========================================")
               print("")
+
               print(
                   repr(e)
               )
@@ -918,6 +791,33 @@ jobs:
           PY
 
           python upload_youtube.py
+
+
+          # ==========================================================
+          # VERIFY RESULT FILE
+          # ==========================================================
+
+          echo ""
+          echo "=========================================="
+          echo "       VERIFYING UPLOAD RESULT"
+          echo "=========================================="
+
+          if [ ! -f "review/upload_result.json" ]; then
+            echo ""
+            echo "ERROR: upload_result.json was not created."
+            echo ""
+            echo "Review directory:"
+            find review -maxdepth 2 -type f -print
+            exit 1
+          fi
+
+          echo ""
+          echo "Upload result found:"
+          cat review/upload_result.json
+
+          echo ""
+          echo "=========================================="
+
 
       # ============================================================
       # 9. CREATE UPLOAD SUMMARY
@@ -941,15 +841,14 @@ jobs:
 
           import json
 
+          RESULT_FILE = "review/upload_result.json"
 
           with open(
-              "review/upload_result.json",
+              RESULT_FILE,
               "r",
               encoding="utf-8"
           ) as f:
-
               data = json.load(f)
-
 
           print(
               "**Title:** "
@@ -959,9 +858,7 @@ jobs:
               )
           )
 
-
           print("")
-
 
           print(
               "**Video ID:** "
@@ -971,9 +868,7 @@ jobs:
               )
           )
 
-
           print("")
-
 
           print(
               "**YouTube URL:** "
@@ -983,9 +878,7 @@ jobs:
               )
           )
 
-
           print("")
-
 
           print(
               "**Privacy:** "
@@ -995,9 +888,7 @@ jobs:
               )
           )
 
-
           print("")
-
 
           print(
               "**SEO Tags:** "
@@ -1019,13 +910,10 @@ jobs:
         uses: actions/upload-artifact@v4
 
         with:
-
           name: ReelToTube-Upload-Result-${{ github.run_id }}
 
           path: |
-
             review/upload_result.json
-
             review/youtube_upload.json
 
           retention-days: 7
@@ -1043,9 +931,12 @@ jobs:
           echo "=========================================="
 
           echo ""
-
           echo "The approved Short was uploaded to YouTube."
 
           echo ""
 
+          echo "Upload result:"
+          cat review/upload_result.json
+
+          echo ""
           echo "=========================================="
