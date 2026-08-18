@@ -549,51 +549,123 @@ jobs:
 
 
           # ========================================================
-          # SEO PROMPT
+          # SEO + SONG ANALYSIS PROMPT
           # ========================================================
 
           prompt = r"""
+          You are an expert YouTube Shorts viral SEO strategist,
+          music-identification analyst, video-content analyst and metadata
+          specialist.
 
-          You are an expert YouTube Shorts SEO strategist,
-          viral content strategist and metadata specialist.
+          Analyze the uploaded video DEEPLY before generating any metadata.
+          Do not just look at the visuals. Actively analyze the AUDIO/MUSIC,
+          spoken words, lyrics, rhythm, melody, visible text and overall
+          context whenever the information is available in the video.
 
-          Analyze the uploaded video carefully.
+          ========================================================
+          1. VIDEO ANALYSIS
+          ========================================================
 
           Identify:
 
-          - Main subject
-          - People/person
-          - Main action
-          - Dance/performance
-          - Song/music if identifiable
-          - Visible text
-          - Language
-          - Mood
-          - Context
-          - Audience
-          - Main topic
-          - Strongest hook
+          - Main subject/person/people
+          - Main action or performance
+          - Dance style/choreography if applicable
+          - Clothing/outfit and visual style when relevant
+          - Setting/background when relevant
+          - Visible text or captions
+          - Language used or heard
+          - Mood/emotion/energy
+          - Video context
+          - Likely target audience
+          - Strongest visual hook
+          - Strongest audio hook
+          - Most replayable moment
           - Search intent
           - Important searchable phrases
 
-          IMPORTANT:
+          ========================================================
+          2. SONG / MUSIC IDENTIFICATION — VERY IMPORTANT
+          ========================================================
 
-          Everything MUST be based on the actual video.
+          Carefully listen to the audio and analyze the music used in the
+          Short. Try to identify the exact song whenever reasonably possible.
 
-          NEVER invent:
+          Check ALL available evidence:
 
-          - celebrities
-          - song names
-          - brands
-          - locations
-          - events
-          - facts
-          - claims
+          - Lyrics or clearly audible words
+          - Chorus/hook lyrics
+          - Melody and recognizable musical pattern
+          - Beat/rhythm/music style
+          - Singer/voice characteristics when useful
+          - On-screen text mentioning the song
+          - Captions/subtitles containing lyrics
+          - Audio intro/outro
+          - Repeated lyric phrases
+          - Any visible Instagram/Reel music information present in the video
 
-          if they cannot reasonably be identified from the video.
+          If you can confidently identify the song from the audio or visible
+          evidence, provide:
+
+          - Exact song title
+          - Artist/singer if identifiable
+          - Original singer if identifiable
+          - Movie/album if identifiable
+          - Language
+          - Music genre/style
+          - Release year/era ONLY if confidently known
+          - Most recognizable lyric/hook
+          - Approximate timestamp where the important song section occurs
+          - Confidence level: HIGH, MEDIUM or LOW
+          - Evidence explaining why the identification is likely correct
+          - Search phrases people could use to find this song
+
+          IMPORTANT SONG RULE:
+
+          NEVER invent or guess an exact song title, artist, movie, album or
+          release year just because it would make the metadata look better.
+
+          If the exact song cannot be identified confidently from the uploaded
+          video's audio/visual evidence, say so explicitly.
+
+          In that case:
+          - Set song_identified to false
+          - Use empty strings for unknown exact song fields
+          - Describe the music style/audio characteristics instead
+          - Provide useful audio-based search terms without pretending they
+            are the exact song name
+
+          Do NOT identify a song solely because a dance style resembles a
+          popular song.
 
           ========================================================
-          RETURN ONLY VALID JSON
+          3. SONG-AWARE SEO STRATEGY
+          ========================================================
+
+          If the song is confidently identified, naturally incorporate the
+          song title and artist/singer into the description and SEO tags when
+          relevant.
+
+          Create song-specific search terms such as:
+
+          - song title
+          - song title + dance
+          - song title + shorts
+          - song title + choreography
+          - song title + reel
+          - artist + song title
+          - singer + song title
+          - movie/album + song title
+          - lyric/hook phrase + song
+
+          Only include these when the song identification is supported.
+
+          If the song is NOT confidently identified, use music-style,
+          lyric-based and topic-based keywords instead. Never fabricate a
+          song name.
+
+          ========================================================
+          4. RETURN ONLY VALID JSON
           ========================================================
 
           Use exactly this structure:
@@ -605,22 +677,36 @@ jobs:
             "tags": "",
             "best_moment": "",
             "category": "",
-            "keywords": ""
+            "keywords": "",
+            "song_details": {
+              "song_identified": false,
+              "song_name": "",
+              "artist": "",
+              "singer": "",
+              "movie_or_album": "",
+              "language": "",
+              "genre_or_style": "",
+              "release_year_or_era": "",
+              "lyric_or_hook": "",
+              "timestamp": "",
+              "confidence": "LOW",
+              "evidence": "",
+              "search_terms": ""
+            }
           }
 
-
           ========================================================
-          TITLE
+          5. TITLE
           ========================================================
 
           Generate ONE YouTube Shorts title.
 
           Requirements:
 
-          - Approximately 40-70 characters.
+          - Approximately 40-70 characters when possible.
           - Strong hook.
           - Curiosity driven.
-          - Accurate.
+          - Accurate to the actual video.
           - SEO friendly.
           - Natural language.
           - Emojis allowed when appropriate.
@@ -628,12 +714,15 @@ jobs:
           - NO misleading claims.
           - Do not provide multiple titles.
 
+          If the song is confidently identified and the song is important to
+          the video, naturally use the song name in the title when that helps
+          search intent. Do not force it.
 
           ========================================================
-          DESCRIPTION
+          6. DESCRIPTION
           ========================================================
 
-          Generate an SEO optimized description.
+          Generate an SEO optimized YouTube Shorts description.
 
           Requirements:
 
@@ -644,14 +733,17 @@ jobs:
           - Include a simple engagement CTA.
           - Do not keyword stuff.
           - Do not repeat sentences.
-          - Do not include a hashtag block inside description.
+          - Do not include a separate hashtag block inside description.
 
+          If the song is confidently identified, naturally mention the song
+          title and artist/singer where useful. If it is not identified,
+          describe the music without inventing a name.
 
           ========================================================
-          HASHTAGS
+          7. HASHTAGS
           ========================================================
 
-          Generate approximately 35-40 relevant hashtags.
+          Generate approximately 35-40 highly relevant hashtags.
 
           MUST include:
 
@@ -666,7 +758,10 @@ jobs:
           - audience hashtags
           - dance hashtags if applicable
           - music hashtags if applicable
-          - Indian/Hindi hashtags if genuinely relevant
+          - song-specific hashtags ONLY if the song is confidently identified
+          - artist/singer hashtags ONLY if confidently identified
+          - movie/album hashtags ONLY if confidently identified
+          - Indian/Hindi hashtags when genuinely relevant
           - searchable topic variations
 
           Rules:
@@ -679,34 +774,34 @@ jobs:
           - Avoid #fyp unless genuinely relevant
           - Return ONE space-separated string.
 
-
           ========================================================
-          SEO TAGS
+          8. SEO TAGS
           ========================================================
 
           Generate highly relevant YouTube SEO tags.
 
           Target:
 
-          400-500 characters.
+          400-480 characters.
 
           NEVER exceed 500 characters.
 
-          Include:
+          Prioritize:
 
-          - exact topic
-          - exact subject
-          - main keyword
-          - long-tail keywords
-          - search phrases
-          - related keywords
-          - synonyms
-          - content type
-          - audience keywords
-          - Shorts-related keywords
-          - Indian/Hindi keywords when relevant
-          - English variations
-          - common spelling variations
+          1. Exact topic
+          2. Exact subject
+          3. Song title and artist/singer when confidently identified
+          4. Song title + dance/reel/shorts/choreography variations
+          5. Main keyword
+          6. Long-tail keywords
+          7. Search phrases
+          8. Related keywords
+          9. Content type
+          10. Audience keywords
+          11. Shorts-related keywords
+          12. Indian/Hindi keywords when relevant
+          13. English variations
+          14. Common spelling variations
 
           Rules:
 
@@ -716,10 +811,10 @@ jobs:
           - no unrelated viral keywords
           - no duplicate tags
           - maximum 500 characters
-
+          - Do not sacrifice relevance just to reach 500 characters.
 
           ========================================================
-          BEST MOMENT
+          9. BEST MOMENT
           ========================================================
 
           Identify the strongest hook/moment.
@@ -727,12 +822,12 @@ jobs:
           Include:
 
           - approximate timestamp
-          - what happens
+          - what happens visually
+          - what happens in the audio/music
           - why it may retain viewers
 
-
           ========================================================
-          CATEGORY
+          10. CATEGORY
           ========================================================
 
           Select the best YouTube category.
@@ -747,9 +842,8 @@ jobs:
           Howto & Style
           Education
 
-
           ========================================================
-          KEYWORDS
+          11. KEYWORDS
           ========================================================
 
           Generate 20-30 relevant searchable keywords.
@@ -761,32 +855,37 @@ jobs:
           - long-tail keywords
           - topic variations
           - audience searches
+          - song-related searches when confidently identified
+          - artist/singer searches when confidently identified
           - Indian/Hindi keywords when relevant
 
           Return comma-separated keywords.
 
-
           ========================================================
-          FINAL QUALITY CONTROL
+          12. FINAL QUALITY CONTROL
           ========================================================
 
           Before returning:
 
-          1. Verify title is accurate.
-          2. Verify description is natural.
-          3. Generate approximately 35-40 hashtags.
-          4. Include #Shorts.
-          5. Include #YouTubeShorts.
-          6. Remove duplicate hashtags.
-          7. Keep hashtags relevant.
-          8. Generate SEO tags near 400-500 characters.
-          9. NEVER exceed 500 characters.
-          10. Remove unrelated keywords.
-          11. Remove misleading hashtags.
-          12. Return ONLY valid JSON.
+          1. Analyze the AUDIO as well as the visuals.
+          2. Try to identify the exact song from lyrics/audio/on-screen evidence.
+          3. Do not invent song names or artists.
+          4. If uncertain, clearly mark the song as not confidently identified.
+          5. Verify title is accurate and clickable.
+          6. Verify description is natural.
+          7. Generate approximately 35-40 relevant hashtags.
+          8. Include #Shorts.
+          9. Include #YouTubeShorts.
+          10. Remove duplicate hashtags.
+          11. Keep hashtags relevant.
+          12. Generate SEO tags around 400-480 characters.
+          13. NEVER exceed 500 tag characters.
+          14. Include song-specific SEO only when supported by evidence.
+          15. Remove unrelated keywords.
+          16. Remove misleading hashtags.
+          17. Return ONLY valid JSON.
 
           """
-
 
           # ========================================================
           # GENERATE
@@ -1361,6 +1460,28 @@ jobs:
               ""
           )
 
+          song_details = data.get(
+              "song_details",
+              {}
+          )
+
+          if not isinstance(song_details, dict):
+              song_details = {}
+
+          song_identified = song_details.get("song_identified", False)
+          song_name = song_details.get("song_name", "")
+          artist = song_details.get("artist", "")
+          singer = song_details.get("singer", "")
+          movie_or_album = song_details.get("movie_or_album", "")
+          song_language = song_details.get("language", "")
+          genre_or_style = song_details.get("genre_or_style", "")
+          release_year_or_era = song_details.get("release_year_or_era", "")
+          lyric_or_hook = song_details.get("lyric_or_hook", "")
+          song_timestamp = song_details.get("timestamp", "")
+          song_confidence = song_details.get("confidence", "")
+          song_evidence = song_details.get("evidence", "")
+          song_search_terms = song_details.get("search_terms", "")
+
 
           review = f"""
           # 🎬 ReelToTube - Review Before Upload
@@ -1383,6 +1504,35 @@ jobs:
           ## SEO TAGS
 
           {tags}
+
+
+          ## SONG / MUSIC ANALYSIS
+
+          **Song identified:** {song_identified}
+
+          **Song:** {song_name}
+
+          **Artist:** {artist}
+
+          **Singer:** {singer}
+
+          **Movie / Album:** {movie_or_album}
+
+          **Language:** {song_language}
+
+          **Genre / Style:** {genre_or_style}
+
+          **Release year / era:** {release_year_or_era}
+
+          **Lyric / hook:** {lyric_or_hook}
+
+          **Song timestamp:** {song_timestamp}
+
+          **Confidence:** {song_confidence}
+
+          **Evidence:** {song_evidence}
+
+          **Song search terms:** {song_search_terms}
 
 
           ## BEST MOMENT
@@ -1515,6 +1665,45 @@ jobs:
           echo "" \
             >> "$GITHUB_STEP_SUMMARY"
 
+          echo "## Song / Music Analysis" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+
+          import json
+
+          with open(
+              "output/metadata.json",
+              "r",
+              encoding="utf-8"
+          ) as f:
+
+              data = json.load(f)
+
+          song = data.get("song_details", {})
+
+          if not isinstance(song, dict):
+              song = {}
+
+          print(f"**Identified:** {song.get('song_identified', False)}")
+          print(f"**Song:** {song.get('song_name', '')}")
+          print(f"**Artist:** {song.get('artist', '')}")
+          print(f"**Singer:** {song.get('singer', '')}")
+          print(f"**Movie / Album:** {song.get('movie_or_album', '')}")
+          print(f"**Language:** {song.get('language', '')}")
+          print(f"**Genre / Style:** {song.get('genre_or_style', '')}")
+          print(f"**Lyric / Hook:** {song.get('lyric_or_hook', '')}")
+          print(f"**Timestamp:** {song.get('timestamp', '')}")
+          print(f"**Confidence:** {song.get('confidence', '')}")
+          print(f"**Evidence:** {song.get('evidence', '')}")
+          print(f"**Search Terms:** {song.get('search_terms', '')}")
+
+          PY
+
+
+          echo "" \
+            >> "$GITHUB_STEP_SUMMARY"
+
           echo "## Hashtags" \
             >> "$GITHUB_STEP_SUMMARY"
 
@@ -1635,6 +1824,10 @@ jobs:
           echo "Hashtags generated."
 
           echo "SEO tags generated."
+
+          echo "Song/music analyzed."
+
+          echo "Song-specific SEO added when confidently identified."
 
           echo ""
 
