@@ -132,7 +132,11 @@ jobs:
 
           python3 -m pip install \
             opencv-python-headless \
-            numpy
+            numpy \
+            Pillow \
+            google-api-python-client \
+            google-auth-httplib2 \
+            google-auth-oauthlib
 
 
       # ============================================================
@@ -430,13 +434,12 @@ jobs:
           python3 -m pip install --upgrade google-genai
 
 
-      # ============================================================
-      # 13. GEMINI VIDEO ANALYSIS
-      # ============================================================
+      # =========================================================
+      # 11. GEMINI ANALYSIS
+      # =========================================================
       - name: Analyze Short with Gemini
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-
         run: |
 
           cat > gemini_analysis.py <<'PY'
@@ -449,64 +452,36 @@ jobs:
           from google import genai
 
 
-          print("==========================================")
-          print("          GEMINI VIDEO ANALYSIS")
-          print("==========================================")
-
-
-          # ========================================================
-          # API KEY
-          # ========================================================
-
-          api_key = os.environ.get(
+          API_KEY = os.environ.get(
               "GEMINI_API_KEY"
           )
 
-
-          if not api_key:
-
+          if not API_KEY:
               raise RuntimeError(
-                  "GEMINI_API_KEY secret is not configured."
+                  "GEMINI_API_KEY is not configured."
               )
 
 
           client = genai.Client(
-              api_key=api_key
+              api_key=API_KEY
           )
 
 
-          video_path = (
-              "output/youtube_short.mp4"
-          )
+          VIDEO_PATH = "output/youtube_short.mp4"
 
 
-          # ========================================================
-          # UPLOAD VIDEO TO GEMINI
-          # ========================================================
-
-          print("")
-          print(
-              "Uploading video to Gemini..."
-          )
+          print("========================================")
+          print("GEMINI VIDEO ANALYSIS")
+          print("========================================")
 
 
           video_file = client.files.upload(
-              file=video_path
+              file=VIDEO_PATH
           )
 
 
           print(
-              f"Gemini file: {video_file.name}"
-          )
-
-
-          # ========================================================
-          # WAIT FOR PROCESSING
-          # ========================================================
-
-          print("")
-          print(
-              "Waiting for Gemini video processing..."
+              f"Uploaded: {video_file.name}"
           )
 
 
@@ -516,324 +491,108 @@ jobs:
                   name=video_file.name
               )
 
-
               state = (
-
                   video_file.state.name
-
                   if video_file.state
-
                   else "UNKNOWN"
-
               )
-
 
               print(
-                  f"Video state: {state}"
+                  f"Gemini state: {state}"
               )
 
-
               if state == "ACTIVE":
-
                   break
 
-
               if state == "FAILED":
-
                   raise RuntimeError(
                       "Gemini failed to process video."
                   )
 
-
               time.sleep(5)
 
 
-          # ========================================================
-          # SEO + SONG ANALYSIS PROMPT
-          # ========================================================
-
           prompt = r"""
-          You are an expert YouTube Shorts viral SEO strategist,
-          music-identification analyst, video-content analyst and metadata
-          specialist.
+          Analyze this YouTube Short carefully.
 
-          Analyze the uploaded video DEEPLY before generating any metadata.
-          Do not just look at the visuals. Actively analyze the AUDIO/MUSIC,
-          spoken words, lyrics, rhythm, melody, visible text and overall
-          context whenever the information is available in the video.
+          You are an expert YouTube Shorts SEO strategist.
 
-          ========================================================
-          1. VIDEO ANALYSIS
-          ========================================================
+          Identify ONLY information that can reasonably be
+          inferred from the video/audio.
 
-          Identify:
+          NEVER invent:
+          - song names
+          - artists
+          - celebrities
+          - locations
+          - brands
+          - events
+          - facts
 
-          - Main subject/person/people
-          - Main action or performance
-          - Dance style/choreography if applicable
-          - Clothing/outfit and visual style when relevant
-          - Setting/background when relevant
-          - Visible text or captions
-          - Language used or heard
-          - Mood/emotion/energy
-          - Video context
-          - Likely target audience
-          - Strongest visual hook
-          - Strongest audio hook
-          - Most replayable moment
-          - Search intent
-          - Important searchable phrases
+          If a song cannot be confidently identified,
+          leave song_name and artist empty.
 
-          ========================================================
-          2. SONG / MUSIC IDENTIFICATION — VERY IMPORTANT
-          ========================================================
+          Return ONLY valid JSON.
 
-          Carefully listen to the audio and analyze the music used in the
-          Short. Try to identify the exact song whenever reasonably possible.
-
-          Check ALL available evidence:
-
-          - Lyrics or clearly audible words
-          - Chorus/hook lyrics
-          - Melody and recognizable musical pattern
-          - Beat/rhythm/music style
-          - Singer/voice characteristics when useful
-          - On-screen text mentioning the song
-          - Captions/subtitles containing lyrics
-          - Audio intro/outro
-          - Repeated lyric phrases
-          - Any visible Instagram/Reel music information present in the video
-
-          If you can confidently identify the song from the audio or visible
-          evidence, provide:
-
-          - Exact song title
-          - Artist/singer if identifiable
-          - Original singer if identifiable
-          - Movie/album if identifiable
-          - Language
-          - Music genre/style
-          - Release year/era ONLY if confidently known
-          - Most recognizable lyric/hook
-          - Approximate timestamp where the important song section occurs
-          - Confidence level: HIGH, MEDIUM or LOW
-          - Evidence explaining why the identification is likely correct
-          - Search phrases people could use to find this song
-
-          IMPORTANT SONG RULE:
-
-          NEVER invent or guess an exact song title, artist, movie, album or
-          release year just because it would make the metadata look better.
-
-          If the exact song cannot be identified confidently from the uploaded
-          video's audio/visual evidence, say so explicitly.
-
-          In that case:
-          - Set song_identified to false
-          - Use empty strings for unknown exact song fields
-          - Describe the music style/audio characteristics instead
-          - Provide useful audio-based search terms without pretending they
-            are the exact song name
-
-          Do NOT identify a song solely because a dance style resembles a
-          popular song.
-
-          ========================================================
-          3. SONG-AWARE SEO STRATEGY
-          ========================================================
-
-          If the song is confidently identified, naturally incorporate the
-          song title and artist/singer into the description and SEO tags when
-          relevant.
-
-          Create song-specific search terms such as:
-
-          - song title
-          - song title + dance
-          - song title + shorts
-          - song title + choreography
-          - song title + reel
-          - artist + song title
-          - singer + song title
-          - movie/album + song title
-          - lyric/hook phrase + song
-
-          Only include these when the song identification is supported.
-
-          If the song is NOT confidently identified, use music-style,
-          lyric-based and topic-based keywords instead. Never fabricate a
-          song name.
-
-          ========================================================
-          4. RETURN ONLY VALID JSON
-          ========================================================
-
-          Use exactly this structure:
+          Structure:
 
           {
             "title": "",
             "description": "",
-            "hashtags": "",
             "tags": "",
+            "hashtags": "",
+            "song_name": "",
+            "artist": "",
             "best_moment": "",
             "category": "",
             "keywords": "",
-            "song_details": {
-              "song_identified": false,
-              "song_name": "",
-              "artist": "",
-              "singer": "",
-              "movie_or_album": "",
-              "language": "",
-              "genre_or_style": "",
-              "release_year_or_era": "",
-              "lyric_or_hook": "",
-              "timestamp": "",
-              "confidence": "LOW",
-              "evidence": "",
-              "search_terms": ""
-            }
+            "pov_text": ""
           }
 
-          ========================================================
-          5. TITLE
-          ========================================================
+          TITLE:
 
-          Generate ONE YouTube Shorts title.
+          - One title only.
+          - Approximately 45-80 characters.
+          - Must end with #Shorts.
+          - No other hashtags.
+          - Natural and clickable.
+          - Accurate.
+          - Mention song only if confidently identified.
 
-          Requirements:
+          DESCRIPTION:
 
-          - Approximately 40-70 characters when possible.
-          - Strong hook.
-          - Curiosity driven.
-          - Accurate to the actual video.
-          - SEO friendly.
-          - Natural language.
-          - Emojis allowed when appropriate.
-          - NO hashtags in title.
-          - NO misleading claims.
-          - Do not provide multiple titles.
+          - 2-4 natural sentences.
+          - Describe what is actually shown.
+          - Include relevant search terms naturally.
+          - Include engagement CTA.
+          - No hashtag block.
 
-          If the song is confidently identified and the song is important to
-          the video, naturally use the song name in the title when that helps
-          search intent. Do not force it.
+          HASHTAGS:
 
-          ========================================================
-          6. DESCRIPTION
-          ========================================================
+          - 8-12 hashtags.
+          - Must include #Shorts.
+          - Must include #YouTubeShorts.
+          - Relevant to actual content.
+          - Song hashtag only when song is known.
+          - No unrelated viral hashtags.
+          - Space-separated.
 
-          Generate an SEO optimized YouTube Shorts description.
+          TAGS:
 
-          Requirements:
+          - 350-490 characters.
+          - Comma-separated.
+          - No hashtags.
+          - No URLs.
+          - Search-intent focused.
+          - No duplicate tags.
 
-          - 2-4 engaging sentences.
-          - Explain what is actually happening.
-          - Naturally include important keywords.
-          - Include relevant niche keywords.
-          - Include a simple engagement CTA.
-          - Do not keyword stuff.
-          - Do not repeat sentences.
-          - Do not include a separate hashtag block inside description.
+          BEST MOMENT:
 
-          If the song is confidently identified, naturally mention the song
-          title and artist/singer where useful. If it is not identified,
-          describe the music without inventing a name.
+          Give approximate timestamp and explain the strongest hook.
 
-          ========================================================
-          7. HASHTAGS
-          ========================================================
+          CATEGORY:
 
-          Generate approximately 35-40 highly relevant hashtags.
-
-          MUST include:
-
-          #Shorts
-          #YouTubeShorts
-
-          Use relevant:
-
-          - niche hashtags
-          - topic hashtags
-          - subject hashtags
-          - audience hashtags
-          - dance hashtags if applicable
-          - music hashtags if applicable
-          - song-specific hashtags ONLY if the song is confidently identified
-          - artist/singer hashtags ONLY if confidently identified
-          - movie/album hashtags ONLY if confidently identified
-          - Indian/Hindi hashtags when genuinely relevant
-          - searchable topic variations
-
-          Rules:
-
-          - Every hashtag starts with #
-          - No spaces inside hashtags
-          - No duplicates
-          - No unrelated hashtags
-          - No spam hashtags
-          - Avoid #fyp unless genuinely relevant
-          - Return ONE space-separated string.
-
-          ========================================================
-          8. SEO TAGS
-          ========================================================
-
-          Generate highly relevant YouTube SEO tags.
-
-          Target:
-
-          400-480 characters.
-
-          NEVER exceed 500 characters.
-
-          Prioritize:
-
-          1. Exact topic
-          2. Exact subject
-          3. Song title and artist/singer when confidently identified
-          4. Song title + dance/reel/shorts/choreography variations
-          5. Main keyword
-          6. Long-tail keywords
-          7. Search phrases
-          8. Related keywords
-          9. Content type
-          10. Audience keywords
-          11. Shorts-related keywords
-          12. Indian/Hindi keywords when relevant
-          13. English variations
-          14. Common spelling variations
-
-          Rules:
-
-          - comma separated
-          - no hashtags
-          - no URLs
-          - no unrelated viral keywords
-          - no duplicate tags
-          - maximum 500 characters
-          - Do not sacrifice relevance just to reach 500 characters.
-
-          ========================================================
-          9. BEST MOMENT
-          ========================================================
-
-          Identify the strongest hook/moment.
-
-          Include:
-
-          - approximate timestamp
-          - what happens visually
-          - what happens in the audio/music
-          - why it may retain viewers
-
-          ========================================================
-          10. CATEGORY
-          ========================================================
-
-          Select the best YouTube category.
-
-          Examples:
-
+          Choose one:
           Entertainment
           Music
           People & Blogs
@@ -842,530 +601,261 @@ jobs:
           Howto & Style
           Education
 
-          ========================================================
-          11. KEYWORDS
-          ========================================================
+          KEYWORDS:
 
-          Generate 20-30 relevant searchable keywords.
+          15-25 relevant keywords.
+          Comma-separated.
 
-          Include:
+          POV_TEXT:
 
-          - primary keywords
-          - secondary keywords
-          - long-tail keywords
-          - topic variations
-          - audience searches
-          - song-related searches when confidently identified
-          - artist/singer searches when confidently identified
-          - Indian/Hindi keywords when relevant
+          Create ONE short, catchy on-screen caption for this dance Reel.
+          It must feel like a polished Instagram/YouTube Reel caption,
+          not a long description.
 
-          Return comma-separated keywords.
+          LANGUAGE:
+          - Natural Hinglish written in Roman/Latin script.
+          - Keep the wording conversational and easy for Indian viewers.
 
-          ========================================================
-          12. FINAL QUALITY CONTROL
-          ========================================================
+          STYLE:
+          - Relatable, witty, smooth and scroll-stopping.
+          - Make it fit the actual dance movement, expression, vibe, situation,
+            or confidently identified song/moment.
+          - Prefer the style of captions such as:
+            "Shuffling was smooth... Agree?"
+            "Beat drop hua... mood automatically ON"
+            "Jab steps clean ho, vibe alag hi hoti hai"
+          - These are style examples only. Do not copy them unless they
+            genuinely fit the video.
 
-          Before returning:
+          STRICT RULES:
+          - Maximum 8 words when possible; absolute maximum 10 words.
+          - Maximum 55 characters.
+          - ONE short sentence/phrase only.
+          - Do NOT write "POV:" at the beginning.
+          - Do NOT write a paragraph or explain the video.
+          - Do NOT use ALL CAPS.
+          - Do NOT use emojis.
+          - Do NOT invent song names, lyrics, artists, people, places or facts.
+          - If the song is confidently identified, a subtle song-related
+            caption is allowed; otherwise keep it movement/vibe related.
+          - Return ONLY the caption text, with no quotes and no extra commentary.
 
-          1. Analyze the AUDIO as well as the visuals.
-          2. Try to identify the exact song from lyrics/audio/on-screen evidence.
-          3. Do not invent song names or artists.
-          4. If uncertain, clearly mark the song as not confidently identified.
-          5. Verify title is accurate and clickable.
-          6. Verify description is natural.
-          7. Generate approximately 35-40 relevant hashtags.
-          8. Include #Shorts.
-          9. Include #YouTubeShorts.
-          10. Remove duplicate hashtags.
-          11. Keep hashtags relevant.
-          12. Generate SEO tags around 400-480 characters.
-          13. NEVER exceed 500 tag characters.
-          14. Include song-specific SEO only when supported by evidence.
-          15. Remove unrelated keywords.
-          16. Remove misleading hashtags.
-          17. Return ONLY valid JSON.
+          FINAL CHECK:
 
+          - title ends with #Shorts
+          - hashtags count 8-12
+          - #Shorts exists
+          - #YouTubeShorts exists
+          - no invented song
+          - no invented artist
+          - tags under 490 characters
+          - valid JSON only
           """
-
-          # ========================================================
-          # GENERATE
-          # ========================================================
-
-          print("")
-          print(
-              "Sending video to Gemini..."
-          )
 
 
           response = client.models.generate_content(
-
               model="gemini-3.6-flash",
-
               contents=[
                   video_file,
                   prompt
               ]
-
           )
 
 
-          text = (
-              response.text
-              .strip()
+          text = response.text.strip()
+
+
+          # Remove markdown JSON fences if Gemini adds them.
+          text = re.sub(
+              r"^```json\s*",
+              "",
+              text,
+              flags=re.IGNORECASE
+          )
+
+          text = re.sub(
+              r"^```\s*",
+              "",
+              text
+          )
+
+          text = re.sub(
+              r"\s*```$",
+              "",
+              text
           )
 
 
-          # ========================================================
-          # CLEAN JSON
-          # ========================================================
-
-          if text.startswith("```"):
-
-              text = text.replace(
-                  "```json",
-                  ""
-              )
-
-              text = text.replace(
-                  "```",
-                  ""
-              )
-
-              text = text.strip()
+          data = json.loads(text)
 
 
-          try:
-
-              data = json.loads(
-                  text
-              )
-
-          except json.JSONDecodeError:
-
-              print("")
-              print(
-                  "Gemini returned invalid JSON:"
-              )
-
-              print(text)
-
-              raise
-
-
-          # ========================================================
-          # CLEAN HASHTAGS
-          # ========================================================
-
-          hashtags = data.get(
+          required = [
+              "title",
+              "description",
+              "tags",
               "hashtags",
-              ""
-          )
-
-
-          if isinstance(
-              hashtags,
-              list
-          ):
-
-              hashtags = " ".join(
-                  str(x)
-                  for x in hashtags
-              )
-
-
-          hashtag_tokens = str(
-              hashtags
-          ).split()
-
-
-          unique_hashtags = []
-
-          seen_hashtags = set()
-
-
-          for hashtag in hashtag_tokens:
-
-              hashtag = str(
-                  hashtag
-              ).strip()
-
-
-              if not hashtag:
-                  continue
-
-
-              # Keep letters, numbers,
-              # underscore and #
-
-              hashtag = re.sub(
-                  r"[^A-Za-z0-9_#]",
-                  "",
-                  hashtag
-              )
-
-
-              if not hashtag:
-                  continue
-
-
-              if not hashtag.startswith("#"):
-
-                  hashtag = "#" + hashtag
-
-
-              key = hashtag.lower()
-
-
-              if key not in seen_hashtags:
-
-                  seen_hashtags.add(
-                      key
-                  )
-
-                  unique_hashtags.append(
-                      hashtag
-                  )
-
-
-          # ========================================================
-          # MANDATORY HASHTAGS
-          # ========================================================
-
-          mandatory = [
-              "#Shorts",
-              "#YouTubeShorts"
+              "song_name",
+              "artist",
+              "best_moment",
+              "category",
+              "keywords",
+              "pov_text"
           ]
 
 
-          for hashtag in reversed(
-              mandatory
-          ):
+          for key in required:
 
-              if (
-                  hashtag.lower()
-                  not in seen_hashtags
-              ):
+              if key not in data:
+                  data[key] = ""
 
-                  unique_hashtags.insert(
-                      0,
-                      hashtag
-                  )
 
-                  seen_hashtags.add(
-                      hashtag.lower()
-                  )
-
-
-          unique_hashtags = (
-              unique_hashtags[:40]
-          )
-
-
-          data["hashtags"] = (
-              " ".join(
-                  unique_hashtags
-              )
-          )
-
-
-          # ========================================================
-          # CLEAN SEO TAGS
-          # ========================================================
-
-          tags = data.get(
-              "tags",
-              ""
-          )
-
-
-          if isinstance(
-              tags,
-              str
-          ):
-
-              raw_tags = [
-                  x.strip()
-                  for x in tags.split(",")
-                  if x.strip()
-              ]
-
-          elif isinstance(
-              tags,
-              list
-          ):
-
-              raw_tags = [
-                  str(x).strip()
-                  for x in tags
-                  if str(x).strip()
-              ]
-
-          else:
-
-              raw_tags = []
-
-
-          final_tags = []
-
-          seen_tags = set()
-
-          current_length = 0
-
-
-          for tag in raw_tags:
-
-              tag = str(
-                  tag
-              ).strip()
-
-
-              if not tag:
-                  continue
-
-
-              # Remove hashtags
-
-              tag = tag.replace(
-                  "#",
-                  " "
-              )
-
-
-              # Remove URLs
-
-              tag = re.sub(
-                  r"https?://\S+|www\.\S+",
-                  " ",
-                  tag,
-                  flags=re.IGNORECASE
-              )
-
-
-              # Keep ASCII letters,
-              # numbers and spaces
-
-              tag = re.sub(
-                  r"[^A-Za-z0-9\s]",
-                  " ",
-                  tag
-              )
-
-
-              # Normalize whitespace
-
-              tag = re.sub(
-                  r"\s+",
-                  " ",
-                  tag
-              ).strip()
-
-
-              if not tag:
-                  continue
-
-
-              # Individual tag max length
-
-              tag = tag[:60].strip()
-
-
-              key = tag.lower()
-
-
-              if key in seen_tags:
-                  continue
-
-
-              extra = len(tag)
-
-
-              if final_tags:
-                  extra += 1
-
-
-              # Keep maximum 490 characters
-              # for safety.
-
-              if (
-                  current_length
-                  + extra
-                  > 490
-              ):
-
-                  break
-
-
-              final_tags.append(
-                  tag
-              )
-
-              seen_tags.add(
-                  key
-              )
-
-              current_length += extra
-
-
-          data["tags"] = ",".join(
-              final_tags
-          )
-
-
-          # ========================================================
-          # CLEAN DESCRIPTION
-          # ========================================================
-
-          description = str(
-              data.get(
-                  "description",
-                  ""
-              )
-          ).strip()
-
-
-          # Remove accidental hashtag marker
-
-          if "[HASHTAG BLOCK]" in description:
-
-              description = (
-                  description
-                  .split(
-                      "[HASHTAG BLOCK]"
-                  )[0]
-                  .strip()
-              )
-
-
-          # Add hashtags to description
-
-          if data["hashtags"]:
-
-              if (
-                  data["hashtags"].lower()
-                  not in description.lower()
-              ):
-
-                  description = (
-                      description
-                      + "\n\n"
-                      + data["hashtags"]
-                  ).strip()
-
-
-          data["description"] = (
-              description
-          )
-
-
-          # ========================================================
-          # VALIDATE
-          # ========================================================
-
+          # Clean title
           title = str(
-              data.get(
-                  "title",
-                  ""
-              )
+              data["title"]
           ).strip()
 
+          title = re.sub(
+              r"\s+#Shorts\s*$",
+              "",
+              title,
+              flags=re.IGNORECASE
+          )
 
-          if not title:
-
-              raise RuntimeError(
-                  "Gemini generated an empty title."
-              )
-
-
-          title = title[:100]
+          title = (
+              title
+              + " #Shorts"
+          )
 
 
           data["title"] = title
 
 
-          hashtag_count = len(
-              data["hashtags"].split()
-          )
-
-
-          seo_length = len(
-              data["tags"]
-          )
-
-
-          print("")
-          print("==========================================")
-          print("         METADATA QUALITY CHECK")
-          print("==========================================")
-
-          print("")
-          print("TITLE:")
-          print(data["title"])
-
-          print("")
-          print("DESCRIPTION:")
-          print(data["description"])
-
-          print("")
-          print(
-              f"HASHTAGS: {hashtag_count}"
-          )
-
-          print(
+          # Clean hashtags
+          hashtags = str(
               data["hashtags"]
+          ).split()
+
+
+          cleaned_hashtags = []
+
+          for tag in hashtags:
+
+              tag = tag.strip()
+
+              if not tag:
+                  continue
+
+              if not tag.startswith("#"):
+                  tag = "#" + tag
+
+              if tag.lower() not in [
+                  x.lower()
+                  for x in cleaned_hashtags
+              ]:
+
+                  cleaned_hashtags.append(tag)
+
+
+          required_hashtags = [
+              "#Shorts",
+              "#YouTubeShorts"
+          ]
+
+
+          for tag in required_hashtags:
+
+              if tag.lower() not in [
+                  x.lower()
+                  for x in cleaned_hashtags
+              ]:
+
+                  cleaned_hashtags.append(tag)
+
+
+          cleaned_hashtags = cleaned_hashtags[:12]
+
+
+          data["hashtags"] = " ".join(
+              cleaned_hashtags
           )
 
-          print("")
-          print(
-              f"SEO TAG CHARACTERS: {seo_length}"
-          )
 
-          print(
+          # Clean tags and enforce max 490 chars.
+          raw_tags = str(
               data["tags"]
           )
 
-          print("")
-          print("BEST MOMENT:")
-          print(
-              data.get(
-                  "best_moment",
-                  ""
+          tags = []
+
+          for tag in raw_tags.split(","):
+
+              tag = tag.strip()
+
+              if not tag:
+                  continue
+
+              tag = tag.replace("#", "")
+
+              if tag.lower() not in [
+                  x.lower()
+                  for x in tags
+              ]:
+
+                  tags.append(tag)
+
+
+          final_tags = []
+
+          current_length = 0
+
+          for tag in tags:
+
+              addition = (
+                  len(tag)
+                  if not final_tags
+                  else len(tag) + 2
               )
+
+              if current_length + addition > 490:
+                  break
+
+              final_tags.append(tag)
+
+              current_length += addition
+
+
+          data["tags"] = ", ".join(
+              final_tags
           )
 
-          print("")
-          print("CATEGORY:")
-          print(
-              data.get(
-                  "category",
-                  ""
-              )
-          )
 
-          print("")
-          print("KEYWORDS:")
-          print(
-              data.get(
-                  "keywords",
-                  ""
-              )
-          )
+          # Clean keywords
+          keywords = []
 
-          print("")
-          print("==========================================")
+          for keyword in str(
+              data["keywords"]
+          ).split(","):
+
+              keyword = keyword.strip()
+
+              if not keyword:
+                  continue
+
+              if keyword.lower() not in [
+                  x.lower()
+                  for x in keywords
+              ]:
+
+                  keywords.append(keyword)
 
 
-          # ========================================================
-          # SAVE
-          # ========================================================
-
-          os.makedirs(
-              "output",
-              exist_ok=True
+          data["keywords"] = ", ".join(
+              keywords[:25]
           )
 
 
           with open(
-              "output/metadata.json",
+              "metadata.json",
               "w",
               encoding="utf-8"
           ) as f:
@@ -1378,469 +868,492 @@ jobs:
               )
 
 
-          print("")
+          print("========================================")
+          print("GENERATED METADATA")
+          print("========================================")
+
           print(
-              "metadata.json created successfully."
+              json.dumps(
+                  data,
+                  ensure_ascii=False,
+                  indent=2
+              )
           )
 
           PY
-
 
           python3 gemini_analysis.py
 
 
-      # ============================================================
-      # 14. SHOW GENERATED METADATA
-      # ============================================================
-      - name: Show Generated Metadata
+      # =========================================================
+      # 12. GENERATE + ADD AI HINGLISH POV OVERLAY
+      # =========================================================
+      - name: Add AI Hinglish POV overlay
         run: |
-
-          echo "=========================================="
-          echo "       GENERATED YOUTUBE METADATA"
-          echo "=========================================="
-
-          cat output/metadata.json
-
-          echo ""
-          echo "=========================================="
-
-
-      # ============================================================
-      # 15. CREATE HUMAN-READABLE REVIEW FILE
-      # ============================================================
-      - name: Create Review File
-        run: |
-
           python3 - <<'PY'
-
           import json
+          import re
+          import textwrap
+          from pathlib import Path
 
+          from PIL import Image, ImageDraw, ImageFont
 
-          with open(
-              "output/metadata.json",
-              "r",
-              encoding="utf-8"
-          ) as f:
+          METADATA = Path("metadata.json")
+          OUTPUT_DIR = Path("output")
+          OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-              data = json.load(f)
+          with METADATA.open("r", encoding="utf-8") as f:
+              metadata = json.load(f)
 
+          pov = str(metadata.get("pov_text", "")).strip()
 
-          title = data.get(
-              "title",
-              ""
+          # Remove accidental quotes / labels and normalize whitespace.
+          pov = pov.strip("\"' ")
+          pov = re.sub(r"^\s*(POV|POV TEXT)\s*[:\-]\s*", "", pov, flags=re.I)
+          pov = re.sub(r"[\r\n]+", " ", pov)
+          pov = re.sub(r"\s+", " ", pov).strip()
+
+          # Keep only characters that are safe for the caption renderer.
+          pov = "".join(
+              ch for ch in pov
+              if ch.isprintable()
+          )
+          pov = re.sub(r"[^\x20-\x7E]", "", pov)
+          pov = re.sub(r"\s+", " ", pov).strip()
+
+          # Hard safety limits for a compact Reel-style caption.
+          if not pov:
+              pov = "Beat aayi... vibe automatically ON"
+          pov = pov[:55].rstrip()
+
+          # Limit to a short caption. If Gemini returns too many words,
+          # keep the most natural first 10 words.
+          words = pov.split()
+          if len(words) > 10:
+              pov = " ".join(words[:10])
+
+          # Use a clean bold font. GitHub Ubuntu includes DejaVu fonts.
+          font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+          font = ImageFont.truetype(font_path, 48)
+
+          # Target caption-card width. The card is intentionally NOT full-width.
+          max_text_width = 820
+          horizontal_padding = 28
+          vertical_padding = 18
+          corner_radius = 20
+
+          # Wrap based on actual pixel width so the card stays compact.
+          temp = Image.new("RGBA", (10, 10), (0, 0, 0, 0))
+          draw = ImageDraw.Draw(temp)
+
+          lines = []
+          current = ""
+
+          for word in pov.split():
+              candidate = word if not current else current + " " + word
+              bbox = draw.textbbox((0, 0), candidate, font=font)
+              width = bbox[2] - bbox[0]
+
+              if width <= max_text_width:
+                  current = candidate
+              else:
+                  if current:
+                      lines.append(current)
+                  current = word
+
+          if current:
+              lines.append(current)
+
+          lines = lines[:2]
+
+          # If the second line is still too wide, reduce the font slightly.
+          while len(lines) > 1:
+              widest = max(
+                  draw.textbbox((0, 0), line, font=font)[2]
+                  for line in lines
+              )
+              if widest <= max_text_width or font.size <= 38:
+                  break
+              font = ImageFont.truetype(font_path, font.size - 2)
+
+          line_spacing = 6
+          bboxes = [
+              draw.textbbox((0, 0), line, font=font)
+              for line in lines
+          ]
+
+          text_width = max(
+              (bbox[2] - bbox[0] for bbox in bboxes),
+              default=0
+          )
+          text_height = sum(
+              bbox[3] - bbox[1]
+              for bbox in bboxes
+          ) + max(0, len(lines) - 1) * line_spacing
+
+          card_width = text_width + horizontal_padding * 2
+          card_height = text_height + vertical_padding * 2
+
+          # Transparent canvas containing ONLY the rounded white card.
+          card = Image.new(
+              "RGBA",
+              (card_width, card_height),
+              (0, 0, 0, 0)
+          )
+          card_draw = ImageDraw.Draw(card)
+
+          # Reference-style: white rounded card + black text.
+          card_draw.rounded_rectangle(
+              (0, 0, card_width - 1, card_height - 1),
+              radius=corner_radius,
+              fill=(255, 255, 255, 255)
           )
 
-          description = data.get(
-              "description",
-              ""
-          )
+          y = vertical_padding
+          for index, line in enumerate(lines):
+              bbox = card_draw.textbbox((0, 0), line, font=font)
+              line_width = bbox[2] - bbox[0]
+              line_height = bbox[3] - bbox[1]
 
-          hashtags = data.get(
-              "hashtags",
-              ""
-          )
+              x = (card_width - line_width) // 2
 
-          tags = data.get(
-              "tags",
-              ""
-          )
-
-          best_moment = data.get(
-              "best_moment",
-              ""
-          )
-
-          category = data.get(
-              "category",
-              ""
-          )
-
-          keywords = data.get(
-              "keywords",
-              ""
-          )
-
-          song_details = data.get(
-              "song_details",
-              {}
-          )
-
-          if not isinstance(song_details, dict):
-              song_details = {}
-
-          song_identified = song_details.get("song_identified", False)
-          song_name = song_details.get("song_name", "")
-          artist = song_details.get("artist", "")
-          singer = song_details.get("singer", "")
-          movie_or_album = song_details.get("movie_or_album", "")
-          song_language = song_details.get("language", "")
-          genre_or_style = song_details.get("genre_or_style", "")
-          release_year_or_era = song_details.get("release_year_or_era", "")
-          lyric_or_hook = song_details.get("lyric_or_hook", "")
-          song_timestamp = song_details.get("timestamp", "")
-          song_confidence = song_details.get("confidence", "")
-          song_evidence = song_details.get("evidence", "")
-          song_search_terms = song_details.get("search_terms", "")
-
-
-          review = f"""
-          # 🎬 ReelToTube - Review Before Upload
-
-          ## TITLE
-
-          {title}
-
-
-          ## DESCRIPTION
-
-          {description}
-
-
-          ## HASHTAGS
-
-          {hashtags}
-
-
-          ## SEO TAGS
-
-          {tags}
-
-
-          ## SONG / MUSIC ANALYSIS
-
-          **Song identified:** {song_identified}
-
-          **Song:** {song_name}
-
-          **Artist:** {artist}
-
-          **Singer:** {singer}
-
-          **Movie / Album:** {movie_or_album}
-
-          **Language:** {song_language}
-
-          **Genre / Style:** {genre_or_style}
-
-          **Release year / era:** {release_year_or_era}
-
-          **Lyric / hook:** {lyric_or_hook}
-
-          **Song timestamp:** {song_timestamp}
-
-          **Confidence:** {song_confidence}
-
-          **Evidence:** {song_evidence}
-
-          **Song search terms:** {song_search_terms}
-
-
-          ## BEST MOMENT
-
-          {best_moment}
-
-
-          ## CATEGORY
-
-          {category}
-
-
-          ## KEYWORDS
-
-          {keywords}
-
-
-          ---
-
-          ## STATUS
-
-          ⚠️ VIDEO HAS NOT BEEN UPLOADED TO YOUTUBE.
-
-          Review the metadata and use the
-          **Upload Approved Short** workflow
-          when you are ready.
-
-          """
-
-
-          with open(
-              "output/REVIEW.md",
-              "w",
-              encoding="utf-8"
-          ) as f:
-
-              f.write(
-                  review.strip()
+              card_draw.text(
+                  (x, y),
+                  line,
+                  font=font,
+                  fill=(0, 0, 0, 255)
               )
 
+              y += line_height + line_spacing
 
+          card_path = OUTPUT_DIR / "pov_card.png"
+          card.save(card_path)
+
+          # Save the clean caption separately for metadata/debugging.
+          overlay_text = "\n".join(lines)
+          (OUTPUT_DIR / "pov.txt").write_text(
+              overlay_text,
+              encoding="utf-8"
+          )
+
+          metadata["pov_text"] = pov
+          metadata["pov_overlay"] = overlay_text
+          metadata["pov_style"] = {
+              "type": "white_rounded_card_black_text",
+              "position": "top_center",
+              "max_words": 10,
+              "max_characters": 55
+          }
+
+          with METADATA.open("w", encoding="utf-8") as f:
+              json.dump(
+                  metadata,
+                  f,
+                  ensure_ascii=False,
+                  indent=2
+              )
+
+          print("========================================")
+          print("AI HINGLISH POV - REFERENCE STYLE")
+          print("========================================")
+          print(overlay_text)
+          print("Card:", card_path)
+          print("========================================")
           PY
 
+          echo "Adding clean rounded POV card to the video..."
 
-          echo ""
-          echo "=========================================="
-          echo "              REVIEW READY"
-          echo "=========================================="
+          ffmpeg \
+            -y \
+            -i output/youtube_short.mp4 \
+            -i output/pov_card.png \
+            -filter_complex "[1:v]format=rgba[card];[0:v][card]overlay=x=(main_w-overlay_w)/2:y=90:format=auto" \
+            -c:v libx264 \
+            -preset veryfast \
+            -crf 20 \
+            -c:a copy \
+            -movflags +faststart \
+            output/youtube_short_pov.mp4
 
-          cat output/REVIEW.md
+          mv output/youtube_short_pov.mp4 output/youtube_short.mp4
+
+          echo "POV overlay added successfully."
+          echo "Style: white rounded rectangle + black text + top center"
+          ls -lh output/youtube_short.mp4 output/pov.txt output/pov_card.png
 
 
-      # ============================================================
-      # 16. GITHUB ACTIONS SUMMARY
-      # ============================================================
-      - name: Create GitHub Review Summary
+      # =========================================================
+      # 13. PREPARE YOUTUBE OAUTH
+      # =========================================================
+      - name: Prepare YouTube OAuth credentials
+        env:
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
         run: |
 
-          echo "# 🎬 ReelToTube - Review Before Upload" \
-            >> "$GITHUB_STEP_SUMMARY"
+          echo "========================================"
+          echo "PREPARING YOUTUBE OAUTH"
+          echo "========================================"
 
-          echo "" \
-            >> "$GITHUB_STEP_SUMMARY"
+          if [ -z "$YOUTUBE_CLIENT_ID" ]; then
+            echo "ERROR: YOUTUBE_CLIENT_ID is missing."
+            exit 1
+          fi
 
-          echo "## ⚠️ YouTube Upload NOT Performed" \
-            >> "$GITHUB_STEP_SUMMARY"
+          if [ -z "$YOUTUBE_CLIENT_SECRET" ]; then
+            echo "ERROR: YOUTUBE_CLIENT_SECRET is missing."
+            exit 1
+          fi
 
-          echo "" \
-            >> "$GITHUB_STEP_SUMMARY"
+          if [ -z "$YOUTUBE_REFRESH_TOKEN" ]; then
+            echo "ERROR: YOUTUBE_REFRESH_TOKEN is missing."
+            exit 1
+          fi
 
-          echo "The Short has been created and Gemini has generated the metadata." \
-            >> "$GITHUB_STEP_SUMMARY"
+          echo "YouTube OAuth secrets are configured."
 
-          echo "" \
-            >> "$GITHUB_STEP_SUMMARY"
 
-          echo "## Title" \
-            >> "$GITHUB_STEP_SUMMARY"
-
-          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
-
+      # =========================================================
+      # 14. UPLOAD TO YOUTUBE
+      # =========================================================
+      - name: Upload Short to YouTube
+        env:
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+        run: |
+          cat > upload_youtube.py <<'PY'
+          import os
           import json
+          import re
+          import unicodedata
 
-          with open(
-              "output/metadata.json",
-              "r",
-              encoding="utf-8"
-          ) as f:
+          from google.oauth2.credentials import Credentials
+          from google.auth.transport.requests import Request
+          from googleapiclient.discovery import build
+          from googleapiclient.http import MediaFileUpload
+          from googleapiclient.errors import HttpError
 
-              data = json.load(f)
+          CLIENT_ID = os.environ.get("YOUTUBE_CLIENT_ID")
+          CLIENT_SECRET = os.environ.get("YOUTUBE_CLIENT_SECRET")
+          REFRESH_TOKEN = os.environ.get("YOUTUBE_REFRESH_TOKEN")
 
-          print(
-              data.get(
-                  "title",
-                  ""
+          if not CLIENT_ID:
+              raise RuntimeError("YOUTUBE_CLIENT_ID is missing.")
+          if not CLIENT_SECRET:
+              raise RuntimeError("YOUTUBE_CLIENT_SECRET is missing.")
+          if not REFRESH_TOKEN:
+              raise RuntimeError("YOUTUBE_REFRESH_TOKEN is missing.")
+
+          with open("metadata.json", "r", encoding="utf-8") as f:
+              metadata = json.load(f)
+
+          title = str(metadata.get("title", "Instagram Reel #Shorts")).strip()
+          description = str(metadata.get("description", "")).strip()
+          hashtags = str(metadata.get("hashtags", "")).strip()
+          raw_tags = str(metadata.get("tags", ""))
+
+          def clean_tag(value):
+              value = unicodedata.normalize("NFKC", str(value))
+              value = re.sub(r"https?://\S+|www\.\S+", " ", value, flags=re.I)
+              value = value.replace("#", " ")
+              value = "".join(
+                  ch for ch in value
+                  if unicodedata.category(ch) not in ("Cc", "Cf")
               )
+              value = re.sub(r"\s+", " ", value).strip()
+              value = value.replace(",", " ")
+              return value.strip()
+
+          parsed_tags = []
+          for item in raw_tags.split(","):
+              tag = clean_tag(item)
+              if not tag:
+                  continue
+              if len(tag) > 80:
+                  tag = tag[:80].rstrip()
+              if not any(tag.casefold() == old.casefold() for old in parsed_tags):
+                  parsed_tags.append(tag)
+
+          # Keep a safety margin below YouTube's total keyword limit.
+          final_tags = []
+          total_chars = 0
+          MAX_TAG_CHARS = 450
+
+          for tag in parsed_tags:
+              addition = len(tag) if not final_tags else len(tag) + 1
+              if total_chars + addition > MAX_TAG_CHARS:
+                  break
+              final_tags.append(tag)
+              total_chars += addition
+
+          final_tags = [
+              tag for tag in final_tags
+              if tag and len(tag) <= 80 and "\n" not in tag and "\r" not in tag
+          ]
+
+          final_description = (description + "\n\n" + hashtags).strip()
+
+          print("========================================")
+          print("YOUTUBE SEO PAYLOAD")
+          print("========================================")
+          print("Title characters:", len(title))
+          print("Description characters:", len(final_description))
+          print("SEO tag count:", len(final_tags))
+          print("SEO tag characters:", len(", ".join(final_tags)))
+          print("SEO tags:", ", ".join(final_tags))
+          print("========================================")
+
+          credentials = Credentials(
+              token=None,
+              refresh_token=REFRESH_TOKEN,
+              token_uri="https://oauth2.googleapis.com/token",
+              client_id=CLIENT_ID,
+              client_secret=CLIENT_SECRET,
+              scopes=["https://www.googleapis.com/auth/youtube.upload"]
           )
 
-          PY
+          print("Refreshing YouTube OAuth...")
+          credentials.refresh(Request())
 
+          youtube = build("youtube", "v3", credentials=credentials)
 
-          echo "" \
-            >> "$GITHUB_STEP_SUMMARY"
+          body = {
+              "snippet": {
+                  "title": title[:100],
+                  "description": final_description[:5000],
+                  "tags": final_tags,
+                  "categoryId": "10"
+              },
+              "status": {
+                  "privacyStatus": "public",
+                  "selfDeclaredMadeForKids": False
+              }
+          }
 
-          echo "## Description" \
-            >> "$GITHUB_STEP_SUMMARY"
-
-          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
-
-          import json
-
-          with open(
-              "output/metadata.json",
-              "r",
-              encoding="utf-8"
-          ) as f:
-
-              data = json.load(f)
-
-          print(
-              data.get(
-                  "description",
-                  ""
-              )
+          media = MediaFileUpload(
+              "output/youtube_short.mp4",
+              mimetype="video/mp4",
+              resumable=True
           )
 
-          PY
-
-
-          echo "" \
-            >> "$GITHUB_STEP_SUMMARY"
-
-          echo "## Song / Music Analysis" \
-            >> "$GITHUB_STEP_SUMMARY"
-
-          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
-
-          import json
-
-          with open(
-              "output/metadata.json",
-              "r",
-              encoding="utf-8"
-          ) as f:
-
-              data = json.load(f)
-
-          song = data.get("song_details", {})
-
-          if not isinstance(song, dict):
-              song = {}
-
-          print(f"**Identified:** {song.get('song_identified', False)}")
-          print(f"**Song:** {song.get('song_name', '')}")
-          print(f"**Artist:** {song.get('artist', '')}")
-          print(f"**Singer:** {song.get('singer', '')}")
-          print(f"**Movie / Album:** {song.get('movie_or_album', '')}")
-          print(f"**Language:** {song.get('language', '')}")
-          print(f"**Genre / Style:** {song.get('genre_or_style', '')}")
-          print(f"**Lyric / Hook:** {song.get('lyric_or_hook', '')}")
-          print(f"**Timestamp:** {song.get('timestamp', '')}")
-          print(f"**Confidence:** {song.get('confidence', '')}")
-          print(f"**Evidence:** {song.get('evidence', '')}")
-          print(f"**Search Terms:** {song.get('search_terms', '')}")
-
-          PY
-
-
-          echo "" \
-            >> "$GITHUB_STEP_SUMMARY"
-
-          echo "## Hashtags" \
-            >> "$GITHUB_STEP_SUMMARY"
-
-          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
-
-          import json
-
-          with open(
-              "output/metadata.json",
-              "r",
-              encoding="utf-8"
-          ) as f:
-
-              data = json.load(f)
-
-          print(
-              data.get(
-                  "hashtags",
-                  ""
+          def upload_video(upload_body):
+              request = youtube.videos().insert(
+                  part="snippet,status",
+                  body=upload_body,
+                  media_body=media
               )
-          )
+              response = None
+              while response is None:
+                  status, response = request.next_chunk()
+                  if status:
+                      print("Upload progress:", int(status.progress() * 100), "%")
+              return response
 
+          print("========================================")
+          print("UPLOADING TO YOUTUBE")
+          print("========================================")
+          print("Title:", title)
+
+          try:
+              response = upload_video(body)
+
+          except HttpError as error:
+              error_text = str(error)
+              print("YouTube API error:", error_text)
+
+              # If YouTube rejects the keyword field, retry once without tags.
+              if getattr(error.resp, "status", None) == 400 and "invalidTags" in error_text:
+                  print("YouTube rejected SEO tags.")
+                  print("Retrying safely WITHOUT tags...")
+
+                  retry_body = {
+                      "snippet": {
+                          "title": title[:100],
+                          "description": final_description[:5000],
+                          "categoryId": "10"
+                      },
+                      "status": {
+                          "privacyStatus": "public",
+                          "selfDeclaredMadeForKids": False
+                      }
+                  }
+
+                  media = MediaFileUpload(
+                      "output/youtube_short.mp4",
+                      mimetype="video/mp4",
+                      resumable=True
+                  )
+                  response = upload_video(retry_body)
+                  print("Fallback upload succeeded.")
+              else:
+                  raise
+
+          video_id = response.get("id")
+          if not video_id:
+              raise RuntimeError("YouTube upload did not return a video ID.")
+
+          result = {
+              "video_id": str(video_id),
+              "url": "https://www.youtube.com/watch?v=" + str(video_id),
+              "title": str(title),
+              "seo_tag_count": len(final_tags),
+              "seo_tag_characters": len(", ".join(final_tags))
+          }
+
+          with open("youtube_upload_result.json", "w", encoding="utf-8") as f:
+              json.dump(result, f, ensure_ascii=False, indent=2)
+
+          print("========================================")
+          print("UPLOAD SUCCESSFUL")
+          print("========================================")
+          print("Video URL:", result["url"])
           PY
 
+          python3 upload_youtube.py
 
-          echo "" \
-            >> "$GITHUB_STEP_SUMMARY"
+      # =========================================================
+      # 15. CHECK YOUTUBE UPLOAD
+      # =========================================================
+      - name: Check YouTube upload result
+        run: |
 
-          echo "## SEO Tags" \
-            >> "$GITHUB_STEP_SUMMARY"
+          echo "========================================"
+          echo "YOUTUBE UPLOAD RESULT"
+          echo "========================================"
 
-          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
-
-          import json
-
-          with open(
-              "output/metadata.json",
-              "r",
-              encoding="utf-8"
-          ) as f:
-
-              data = json.load(f)
-
-          print(
-              data.get(
-                  "tags",
-                  ""
-              )
-          )
-
-          PY
+          cat youtube_upload_result.json
 
 
-          echo "" \
-            >> "$GITHUB_STEP_SUMMARY"
-
-          echo "---" \
-            >> "$GITHUB_STEP_SUMMARY"
-
-          echo "" \
-            >> "$GITHUB_STEP_SUMMARY"
-
-          echo "📦 Download the **ReelToTube-Review** artifact." \
-            >> "$GITHUB_STEP_SUMMARY"
-
-          echo "" \
-            >> "$GITHUB_STEP_SUMMARY"
-
-          echo "Then run **Upload Approved Short** after editing the metadata." \
-            >> "$GITHUB_STEP_SUMMARY"
-
-
-      # ============================================================
-      # 17. UPLOAD REVIEW ARTIFACT
-      # ============================================================
-      - name: Upload ReelToTube Review Package
+      # =========================================================
+      # 16. SAVE OUTPUTS
+      # =========================================================
+      - name: Upload processed videos and metadata
         uses: actions/upload-artifact@v4
-
         with:
-
-          name: ReelToTube-Review-${{ github.run_id }}
-
+          name: reel-to-youtube-result
           path: |
-
-            output/reel.mp4
             output/youtube_short.mp4
-            output/metadata.json
-            output/REVIEW.md
+            metadata.json
+            output/pov.txt
+            youtube_upload_result.json
             best_section.txt
+          if-no-files-found: ignore
 
-          retention-days: 7
 
-
-      # ============================================================
-      # 18. FINAL STATUS
-      # ============================================================
-      - name: Review Ready
+      # =========================================================
+      # 17. SUCCESS
+      # =========================================================
+      - name: Test successful
         run: |
 
-          echo ""
-          echo "=========================================="
-          echo "       REELTOTUBE REVIEW READY"
-          echo "=========================================="
+          echo "========================================"
+          echo "REELTOTUBE PROCESSOR COMPLETE"
+          echo "YouTube duplicate checking: DISABLED"
+          echo "========================================"
 
-          echo ""
-          echo "Instagram Reel processed successfully."
+          echo "STATUS: PROCESSED"
+          echo "UPLOAD: COMPLETED"
 
-          echo "Best section detected."
-
-          echo "YouTube Short created."
-
-          echo "Gemini metadata generated."
-
-          echo "Title generated."
-
-          echo "Description generated."
-
-          echo "Hashtags generated."
-
-          echo "SEO tags generated."
-
-          echo "Song/music analyzed."
-
-          echo "Song-specific SEO added when confidently identified."
-
-          echo ""
-
-          echo "=========================================="
-          echo "       NO YOUTUBE UPLOAD WAS PERFORMED"
-          echo "=========================================="
-
-          echo ""
-
-          echo "Review the metadata."
-
-          echo "Then use the Upload Approved Short workflow."
-
-          echo ""
-
-          echo "=========================================="
+          echo "========================================"
