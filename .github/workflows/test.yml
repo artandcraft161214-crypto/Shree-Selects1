@@ -1,4 +1,5 @@
-name: Shree Ricka
+
+name: Shree Ricka - ReelToTube AI 2.0
 
 on:
   workflow_dispatch:
@@ -14,539 +15,247 @@ permissions:
 jobs:
   process:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
 
-      # ============================================================
+      # ==================================================
       # 1. CHECKOUT
-      # ============================================================
+      # ==================================================
       - name: Checkout repository
         uses: actions/checkout@v4
 
-
-      # ============================================================
-      # 2. SHOW INPUT
-      # ============================================================
-      - name: Show Reel URL
-        run: |
-          echo "=========================================="
-          echo "        ReelToTube Processor"
-          echo "=========================================="
-          echo ""
-          echo "Instagram URL:"
-          echo "${{ inputs.instagram_url }}"
-          echo ""
-          echo "=========================================="
-
-
-      # ============================================================
-      # 3. INSTALL FFMPEG
-      # ============================================================
-      - name: Install FFmpeg
+      # ==================================================
+      # 2. INSTALL DEPENDENCIES
+      # ==================================================
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg fonts-dejavu-core
 
-          echo ""
-          echo "FFmpeg:"
-          ffmpeg -version | head -n 3
+          python3 -m pip install --upgrade pip
 
-          echo ""
-          echo "FFprobe:"
-          ffprobe -version | head -n 3
+          python3 -m pip install \
+            yt-dlp \
+            opencv-python-headless \
+            numpy \
+            Pillow \
+            google-genai \
+            google-api-python-client \
+            google-auth \
+            google-auth-httplib2 \
+            google-auth-oauthlib
 
-
-      # ============================================================
-      # 4. CHECK PYTHON
-      # ============================================================
-      - name: Check Python
-        run: |
+          ffmpeg -version | head -n 2
           python3 --version
-          python3 -m pip --version
-
-
-      # ============================================================
-      # 5. INSTALL YT-DLP
-      # ============================================================
-      - name: Install yt-dlp
-        run: |
-          python3 -m pip install --upgrade yt-dlp
           yt-dlp --version
 
-
-      # ============================================================
-      # 6. DOWNLOAD INSTAGRAM REEL
-      # ============================================================
+      # ==================================================
+      # 3. DOWNLOAD INSTAGRAM REEL
+      # ==================================================
       - name: Download Instagram Reel
+        env:
+          INSTAGRAM_URL: ${{ inputs.instagram_url }}
         run: |
-
           mkdir -p output
 
-          echo "=========================================="
-          echo "       DOWNLOADING INSTAGRAM REEL"
-          echo "=========================================="
+          if [ -z "$INSTAGRAM_URL" ]; then
+            echo "ERROR: Instagram URL is missing."
+            exit 1
+          fi
+
+          echo "Downloading Instagram Reel..."
 
           yt-dlp \
             --no-playlist \
             --merge-output-format mp4 \
             -o "output/reel.%(ext)s" \
-            "${{ inputs.instagram_url }}"
+            "$INSTAGRAM_URL"
 
-          echo ""
-          echo "Download completed."
-
-          ls -lh output/
-
-
-      # ============================================================
-      # 7. CHECK VIDEO
-      # ============================================================
-      - name: Check downloaded video
-        run: |
-
-          echo "=========================================="
-          echo "       DOWNLOADED VIDEO INFORMATION"
-          echo "=========================================="
-
-          ls -lh output/
-
-          if [ ! -f "output/reel.mp4" ]; then
-            echo "ERROR: output/reel.mp4 was not found."
+          if [ ! -s output/reel.mp4 ]; then
+            echo "ERROR: Video download failed."
+            ls -lh output/
             exit 1
           fi
 
-          ffprobe \
-            -v error \
+          ls -lh output/reel.mp4
+
+      # ==================================================
+      # 4. VALIDATE VIDEO
+      # ==================================================
+      - name: Validate downloaded video
+        run: |
+          ffprobe -v error \
             -show_entries format=duration,size \
             -of default=noprint_wrappers=1 \
             output/reel.mp4
 
-
-      # ============================================================
-      # 8. INSTALL VIDEO ANALYSIS TOOLS
-      # ============================================================
-      - name: Install video analysis tools
+      # ==================================================
+      # 5. ANALYZE BEST VIDEO SECTION
+      # ==================================================
+      - name: Find best video section
         run: |
-
-          python3 -m pip install --upgrade pip
-
-          python3 -m pip install \
-            opencv-python-headless \
-            numpy \
-            Pillow \
-            google-api-python-client \
-            google-auth-httplib2 \
-            google-auth-oauthlib
-
-
-      # ============================================================
-      # 9. FIND BEST SECTION
-      # ============================================================
-      - name: Find best section
-        run: |
-
           cat > analyze_video.py <<'PY'
-
           import cv2
           import numpy as np
 
-
           VIDEO = "output/reel.mp4"
-
 
           cap = cv2.VideoCapture(VIDEO)
 
+          fps = cap.get(cv2.CAP_PROP_FPS)
+          frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-          fps = cap.get(
-              cv2.CAP_PROP_FPS
-          )
+          if fps <= 0 or frames <= 0:
+              raise RuntimeError("Invalid video information.")
 
-          frame_count = int(
-              cap.get(
-                  cv2.CAP_PROP_FRAME_COUNT
-              )
-          )
+          duration = frames / fps
+          target_length = min(30.0, duration)
 
-
-          if fps <= 0:
-              fps = 30
-
-
-          duration = (
-              frame_count / fps
-          )
-
-
-          print("==========================================")
-          print("             VIDEO ANALYSIS")
-          print("==========================================")
-          print(f"FPS: {fps}")
-          print(f"Frames: {frame_count}")
-          print(f"Duration: {duration:.2f} seconds")
-
-
-          # Maximum Short length
-          short_length = min(
-              30.0,
-              duration
-          )
-
-
-          # If video is shorter than 30 seconds,
-          # simply start from zero.
+          print("Duration:", round(duration, 2))
 
           if duration <= 30:
-
               best_start = 0.0
-
           else:
-
               scores = []
-
               previous = None
 
-              second = 0
-
-
-              while second < duration:
-
+              for second in range(int(duration)):
                   cap.set(
                       cv2.CAP_PROP_POS_MSEC,
                       second * 1000
                   )
 
-
                   ret, frame = cap.read()
 
-
                   if not ret:
-                      break
+                      continue
 
-
-                  frame = cv2.resize(
-                      frame,
-                      (320, 180)
-                  )
-
-
+                  frame = cv2.resize(frame, (320, 180))
                   gray = cv2.cvtColor(
                       frame,
                       cv2.COLOR_BGR2GRAY
                   )
 
-
                   if previous is not None:
-
                       difference = cv2.absdiff(
                           gray,
                           previous
                       )
 
-
-                      score = float(
-                          np.mean(difference)
-                      )
-
-
                       scores.append(
-                          (
-                              second,
-                              score
-                          )
+                          (second, float(np.mean(difference)))
                       )
-
 
                   previous = gray
 
-                  second += 1
+              window = int(target_length)
+              best_score = -1
+              best_start = 0
 
-
-              cap.release()
-
-
-              if not scores:
-
-                  best_start = 0.0
-
-              else:
-
-                  window = int(
-                      short_length
-                  )
-
-                  best_start = 0
-
-                  best_score = -1
-
-
-                  for start in range(
-                      0,
-                      max(
-                          1,
-                          int(duration)
-                      )
-                  ):
-
-                      end = (
-                          start
-                          + window
-                      )
-
-
-                      total = sum(
-                          score
-                          for timestamp, score
-                          in scores
-                          if (
-                              start
-                              <= timestamp
-                              < end
-                          )
-                      )
-
-
-                      if total > best_score:
-
-                          best_score = total
-
-                          best_start = start
-
-
-                  # Do not exceed duration.
-
-                  if (
-                      best_start
-                      + short_length
-                      > duration
-                  ):
-
-                      best_start = max(
-                          0,
-                          duration
-                          - short_length
-                      )
-
-
-          print("")
-          print("==========================================")
-          print("           BEST SECTION FOUND")
-          print("==========================================")
-
-          print(
-              f"Start: {best_start:.2f} seconds"
-          )
-
-          print(
-              f"Length: {short_length:.2f} seconds"
-          )
-
-
-          with open(
-              "best_section.txt",
-              "w",
-              encoding="utf-8"
-          ) as f:
-
-              f.write(
-                  str(best_start)
+              max_start = max(
+                  1,
+                  int(duration - target_length) + 1
               )
 
+              for start in range(max_start):
+                  score = sum(
+                      value
+                      for timestamp, value in scores
+                      if start <= timestamp < start + window
+                  )
 
-          print("==========================================")
+                  if score > best_score:
+                      best_score = score
+                      best_start = start
 
+          cap.release()
+
+          with open("best_section.txt", "w") as f:
+              f.write(str(best_start))
+
+          with open("video_duration.txt", "w") as f:
+              f.write(str(target_length))
+
+          print("Best start:", best_start)
+          print("Selected duration:", target_length)
           PY
-
 
           python3 analyze_video.py
 
-
-      # ============================================================
-      # 10. CREATE YOUTUBE SHORT
-      # ============================================================
+      # ==================================================
+      # 6. CREATE YOUTUBE SHORT
+      # ==================================================
       - name: Create YouTube Short
         run: |
-
           START=$(cat best_section.txt)
+          LENGTH=$(cat video_duration.txt)
 
+          echo "Starting at: $START"
+          echo "Duration: $LENGTH"
 
-          echo "=========================================="
-          echo "        CREATING YOUTUBE SHORT"
-          echo "=========================================="
-
-          echo "Start position:"
-          echo "${START}s"
-
-
-          ffmpeg \
-            -y \
-            -ss "${START}" \
+          ffmpeg -y \
+            -ss "$START" \
             -i output/reel.mp4 \
-            -t 30 \
+            -t "$LENGTH" \
+            -map 0:v:0 \
+            -map '0:a:0?' \
             -c:v libx264 \
             -preset veryfast \
             -crf 20 \
             -c:a aac \
+            -b:a 128k \
             -movflags +faststart \
             output/youtube_short.mp4
 
-
-          echo ""
-          echo "YouTube Short created."
-
-          ls -lh output/
-
-
-      # ============================================================
-      # 11. CHECK SHORT
-      # ============================================================
-      - name: Check final Short
-        run: |
-
-          echo "=========================================="
-          echo "         FINAL SHORT INFORMATION"
-          echo "=========================================="
-
-
-          if [ ! -f "output/youtube_short.mp4" ]; then
-
-            echo "ERROR:"
-            echo "youtube_short.mp4 was not created."
-
+          if [ ! -s output/youtube_short.mp4 ]; then
+            echo "ERROR: Short creation failed."
             exit 1
-
           fi
 
-
-          ffprobe \
-            -v error \
-            -show_entries \
-            format=duration,size \
+          ffprobe -v error \
+            -show_entries format=duration \
             -of default=noprint_wrappers=1 \
             output/youtube_short.mp4
 
-
-      # ============================================================
-      # 12. INSTALL GEMINI SDK
-      # ============================================================
-      - name: Install Gemini SDK
-        run: |
-
-          python3 -m pip install --upgrade google-genai
-
-
-      # =========================================================
-      # 11. GEMINI ANALYSIS
-      # =========================================================
+      # ==================================================
+      # 7. GEMINI VIDEO ANALYSIS AND SEO
+      # ==================================================
       - name: Analyze Short with Gemini
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-
           cat > gemini_analysis.py <<'PY'
-
           import os
+          import re
           import json
           import time
-          import re
 
           from google import genai
 
-
-          API_KEY = os.environ.get(
-              "GEMINI_API_KEY"
-          )
+          API_KEY = os.environ.get("GEMINI_API_KEY")
+          VIDEO = "output/youtube_short.mp4"
 
           if not API_KEY:
-              raise RuntimeError(
-                  "GEMINI_API_KEY is not configured."
-              )
+              raise RuntimeError("GEMINI_API_KEY is missing.")
 
+          if not os.path.exists(VIDEO):
+              raise RuntimeError("Video file not found.")
 
-          client = genai.Client(
-              api_key=API_KEY
-          )
+          client = genai.Client(api_key=API_KEY)
 
+          # Primary and backup models.
+          MODELS = [
+              "gemini-3.8-flash",
+              "gemini-3.6-flash"
+          ]
 
-          VIDEO_PATH = "output/youtube_short.mp4"
+          PROMPT = r"""
+          Analyze this actual YouTube Short video carefully.
 
+          You are an expert Indian YouTube Shorts strategist.
 
-          print("========================================")
-          print("GEMINI VIDEO ANALYSIS")
-          print("========================================")
-
-
-          video_file = client.files.upload(
-              file=VIDEO_PATH
-          )
-
-
-          print(
-              f"Uploaded: {video_file.name}"
-          )
-
-
-          # Wait for Gemini to finish processing the uploaded video.
-          # Timeout prevents the GitHub Action from waiting forever.
-          MAX_PROCESSING_WAIT = 300
-          waited = 0
-
-          while waited < MAX_PROCESSING_WAIT:
-
-              video_file = client.files.get(
-                  name=video_file.name
-              )
-
-              state = (
-                  video_file.state.name
-                  if video_file.state
-                  else "UNKNOWN"
-              )
-
-              print(
-                  f"Gemini state: {state}"
-              )
-
-              if state == "ACTIVE":
-                  break
-
-              if state == "FAILED":
-                  raise RuntimeError(
-                      "Gemini failed to process video."
-                  )
-
-              time.sleep(5)
-              waited += 5
-
-          else:
-              raise RuntimeError(
-                  "Gemini video processing timed out after "
-                  f"{MAX_PROCESSING_WAIT} seconds."
-              )
-
-
-          prompt = r"""
-          Analyze this YouTube Short carefully.
-
-          You are an expert YouTube Shorts SEO strategist.
-
-          Identify ONLY information that can reasonably be
-          inferred from the video/audio.
-
-          NEVER invent:
-          - song names
-          - artists
-          - celebrities
-          - locations
-          - brands
-          - events
-          - facts
-
-          If a song cannot be confidently identified,
-          leave song_name and artist empty.
-
-          Return ONLY valid JSON.
-
-          Structure:
+          Return ONLY valid JSON:
 
           {
             "title": "",
@@ -561,521 +270,406 @@ jobs:
             "pov_text": ""
           }
 
-          TITLE:
+          ACCURACY:
+          - Describe only what is visible or audible.
+          - Never invent people, locations, artists, songs or brands.
+          - Leave song_name and artist empty if uncertain.
+          - Never claim guaranteed virality.
 
-          - One title only.
+          TITLE:
+          - One engaging accurate title.
           - Approximately 45-80 characters.
           - Must end with #Shorts.
           - No other hashtags.
-          - Natural and clickable.
-          - Accurate.
-          - Mention song only if confidently identified.
 
           DESCRIPTION:
-
           - 2-4 natural sentences.
-          - Describe what is actually shown.
-          - Include relevant search terms naturally.
-          - Include engagement CTA.
-          - No hashtag block.
+          - Describe actual video content.
+          - Include relevant search terms.
+          - Include a natural engagement question.
+          - No separate hashtag block.
 
           HASHTAGS:
-
-          - 8-12 hashtags.
-          - Must include #Shorts.
-          - Must include #YouTubeShorts.
-          - Relevant to actual content.
-          - Song hashtag only when song is known.
-          - No unrelated viral hashtags.
-          - Space-separated.
+          - 8-12 relevant hashtags.
+          - Include #Shorts and #YouTubeShorts.
+          - Space separated.
+          - No irrelevant viral hashtags.
 
           TAGS:
+          - Comma-separated SEO tags.
+          - Aim for 350-450 characters.
+          - Maximum 490 characters.
+          - No duplicates.
 
-          - 350-490 characters.
-          - Comma-separated.
-          - No hashtags.
-          - No URLs.
-          - Search-intent focused.
-          - No duplicate tags.
-
-          BEST MOMENT:
-
-          Give approximate timestamp and explain the strongest hook.
+          BEST_MOMENT:
+          - Approximate timestamp.
+          - Identify strongest visual moment.
+          - Suggest the best opening hook.
 
           CATEGORY:
-
           Choose one:
-          Entertainment
-          Music
-          People & Blogs
-          Comedy
-          Sports
-          Howto & Style
-          Education
+          Entertainment, Music, People & Blogs, Comedy,
+          Sports, Howto & Style, Education.
 
           KEYWORDS:
-
-          15-25 relevant keywords.
-          Comma-separated.
+          - 15-25 relevant keywords.
+          - Comma separated.
 
           POV_TEXT:
-
-          Create ONE short, catchy on-screen caption for this dance Reel.
-          It must feel like a polished Instagram/YouTube Reel caption,
-          not a long description.
-
-          LANGUAGE:
-          - Natural Hinglish written in Roman/Latin script.
-          - Keep the wording conversational and easy for Indian viewers.
-
-          STYLE:
-          - Relatable, witty, smooth and scroll-stopping.
-          - Make it fit the actual dance movement, expression, vibe, situation,
-            or confidently identified song/moment.
-          - Prefer the style of captions such as:
-            "Shuffling was smooth... Agree?"
-            "Beat drop hua... mood automatically ON"
-            "Jab steps clean ho, vibe alag hi hoti hai"
-          - These are style examples only. Do not copy them unless they
-            genuinely fit the video.
-
-          STRICT RULES:
-          - Maximum 8 words when possible; absolute maximum 10 words.
+          - One short Hinglish caption in Roman script.
+          - Relatable and catchy.
+          - Maximum 10 words.
           - Maximum 55 characters.
-          - ONE short sentence/phrase only.
-          - Do NOT write "POV:" at the beginning.
-          - Do NOT write a paragraph or explain the video.
-          - Do NOT use ALL CAPS.
-          - Do NOT use emojis.
-          - Do NOT invent song names, lyrics, artists, people, places or facts.
-          - If the song is confidently identified, a subtle song-related
-            caption is allowed; otherwise keep it movement/vibe related.
-          - Return ONLY the caption text, with no quotes and no extra commentary.
+          - No POV: prefix.
+          - No emojis.
+          - No ALL CAPS.
+          - No invented song lyrics.
 
-          FINAL CHECK:
-
-          - title ends with #Shorts
-          - hashtags count 8-12
-          - #Shorts exists
-          - #YouTubeShorts exists
-          - no invented song
-          - no invented artist
-          - tags under 490 characters
-          - valid JSON only
+          Return valid JSON only.
+          No Markdown fences.
           """
 
+          def parse_json(text):
+              text = text.strip()
 
-          # ==================================================
-          # GEMINI GENERATION WITH RETRY + FALLBACK
-          # ==================================================
-
-          response = None
-          last_error = None
-          MAX_ATTEMPTS = 5
-
-          for attempt in range(MAX_ATTEMPTS):
-
-              try:
-
-                  print("")
-                  print("========================================")
-                  print(
-                      f"Gemini generation attempt "
-                      f"{attempt + 1}/{MAX_ATTEMPTS}"
-                  )
-                  print("========================================")
-
-                  response = client.models.generate_content(
-                      model="gemini-3.6-flash",
-                      contents=[
-                          video_file,
-                          prompt
-                      ]
-                  )
-
-                  if not response or not response.text:
-                      raise RuntimeError(
-                          "Gemini returned an empty response."
-                      )
-
-                  print("Gemini generation successful.")
-                  break
-
-              except Exception as error:
-
-                  response = None
-                  last_error = error
-
-                  print(
-                      f"Gemini attempt {attempt + 1} failed: {error}"
-                  )
-
-                  if attempt < MAX_ATTEMPTS - 1:
-
-                      wait_time = min(
-                          15 * (2 ** attempt),
-                          120
-                      )
-
-                      print(
-                          f"Waiting {wait_time} seconds before retry..."
-                      )
-
-                      time.sleep(wait_time)
-
-
-          def fallback_metadata():
-              return {
-                  "title": "Amazing Dance Performance #Shorts",
-                  "description": (
-                      "Enjoy this energetic dance performance and the "
-                      "amazing moves. Watch till the end and share your "
-                      "thoughts!"
-                  ),
-                  "tags": (
-                      "dance, dance performance, amazing dance, "
-                      "dance video, viral dance, dance shorts, "
-                      "youtube shorts, instagram reel, dance moves, "
-                      "trending dance"
-                  ),
-                  "hashtags": (
-                      "#Shorts #YouTubeShorts #Dance "
-                      "#DancePerformance #DanceVideo #ViralDance "
-                      "#Trending #Reels"
-                  ),
-                  "song_name": "",
-                  "artist": "",
-                  "best_moment": "Watch the strongest dance sequence.",
-                  "category": "Entertainment",
-                  "keywords": (
-                      "dance, dance performance, dance video, "
-                      "dance moves, viral dance, trending dance, "
-                      "youtube shorts, instagram reel, "
-                      "short dance video, performance"
-                  ),
-                  "pov_text": "Steps clean hain, vibe alag hi hai"
-              }
-
-
-          # ==================================================
-          # NORMAL GEMINI RESPONSE OR EMERGENCY FALLBACK
-          # ==================================================
-
-          if response is None:
-
-              print("")
-              print("========================================")
-              print("GEMINI UNAVAILABLE")
-              print("USING EMERGENCY FALLBACK METADATA")
-              print("========================================")
-              print(f"Last Gemini error: {last_error}")
-
-              data = fallback_metadata()
-
-          else:
-
-              text = response.text.strip()
-
-              # Remove markdown JSON fences if Gemini adds them.
               text = re.sub(
-                  r"^```json\s*",
+                  r"^```(?:json)?\s*",
                   "",
                   text,
                   flags=re.IGNORECASE
               )
 
-              text = re.sub(
-                  r"^```\s*",
+              text = re.sub(r"\s*```$", "", text)
+
+              start = text.find("{")
+              end = text.rfind("}")
+
+              if start < 0 or end < 0:
+                  raise ValueError("JSON not found.")
+
+              return json.loads(text[start:end + 1])
+
+          def clean_metadata(data):
+              if not isinstance(data, dict):
+                  raise ValueError("Invalid JSON object.")
+
+              defaults = {
+                  "title": "Amazing Dance Performance",
+                  "description": (
+                      "Enjoy this amazing dance performance. "
+                      "Watch till the end and share your thoughts!"
+                  ),
+                  "tags": (
+                      "dance, dance performance, dance video, "
+                      "dance moves, youtube shorts, dance shorts"
+                  ),
+                  "hashtags": (
+                      "#Shorts #YouTubeShorts #Dance "
+                      "#DancePerformance #DanceVideo"
+                  ),
+                  "song_name": "",
+                  "artist": "",
+                  "best_moment": "Strongest dance sequence",
+                  "category": "Entertainment",
+                  "keywords": (
+                      "dance, dance performance, dance video, "
+                      "dance moves, youtube shorts"
+                  ),
+                  "pov_text": "Steps clean hain, vibe alag hi hai"
+              }
+
+              for key, value in defaults.items():
+                  if not isinstance(data.get(key), str):
+                      data[key] = value
+
+              title = re.sub(
+                  r"\s*#Shorts\s*$",
                   "",
-                  text
+                  data["title"].strip(),
+                  flags=re.IGNORECASE
               )
 
-              text = re.sub(
-                  r"\s*```$",
+              data["title"] = (
+                  (title or defaults["title"])[:90].strip()
+                  + " #Shorts"
+              )
+
+              data["description"] = (
+                  data["description"].strip()
+                  or defaults["description"]
+              )
+
+              hashtags = []
+
+              for tag in data["hashtags"].split():
+                  tag = tag.strip()
+
+                  if not tag:
+                      continue
+
+                  if not tag.startswith("#"):
+                      tag = "#" + tag
+
+                  if tag.lower() not in [
+                      x.lower() for x in hashtags
+                  ]:
+                      hashtags.append(tag)
+
+              for tag in ["#Shorts", "#YouTubeShorts"]:
+                  if tag.lower() not in [
+                      x.lower() for x in hashtags
+                  ]:
+                      hashtags.append(tag)
+
+              data["hashtags"] = " ".join(hashtags[:12])
+
+              seo_tags = []
+
+              for tag in data["tags"].split(","):
+                  tag = tag.strip().replace("#", "")
+
+                  if tag and tag.lower() not in [
+                      x.lower() for x in seo_tags
+                  ]:
+                      seo_tags.append(tag)
+
+              final_tags = []
+
+              for tag in seo_tags:
+                  candidate = ", ".join(final_tags + [tag])
+
+                  if len(candidate) > 490:
+                      break
+
+                  final_tags.append(tag)
+
+              data["tags"] = ", ".join(final_tags)
+
+              keywords = []
+
+              for item in data["keywords"].split(","):
+                  item = item.strip()
+
+                  if item and item.lower() not in [
+                      x.lower() for x in keywords
+                  ]:
+                      keywords.append(item)
+
+              data["keywords"] = ", ".join(keywords[:25])
+
+              pov = re.sub(
+                  r"^\s*POV\s*:\s*",
                   "",
-                  text
+                  data["pov_text"].strip(),
+                  flags=re.IGNORECASE
               )
 
-              try:
-                  data = json.loads(text)
+              pov = re.sub(r"\s+", " ", pov)
+              pov = " ".join(pov.split()[:10])[:55].strip()
 
-              except json.JSONDecodeError as error:
-
-                  print(
-                      "Gemini returned invalid JSON. "
-                      "Using emergency fallback metadata."
-                  )
-                  print(f"JSON error: {error}")
-
-                  data = fallback_metadata()
-
-
-          required = [
-              "title",
-              "description",
-              "tags",
-              "hashtags",
-              "song_name",
-              "artist",
-              "best_moment",
-              "category",
-              "keywords",
-              "pov_text"
-          ]
-
-
-          for key in required:
-
-              if key not in data:
-                  data[key] = ""
-
-
-          # Clean title
-          title = str(
-              data["title"]
-          ).strip()
-
-          title = re.sub(
-              r"\s+#Shorts\s*$",
-              "",
-              title,
-              flags=re.IGNORECASE
-          )
-
-          title = (
-              title
-              + " #Shorts"
-          )
-
-
-          data["title"] = title
-
-
-          # Clean hashtags
-          hashtags = str(
-              data["hashtags"]
-          ).split()
-
-
-          cleaned_hashtags = []
-
-          for tag in hashtags:
-
-              tag = tag.strip()
-
-              if not tag:
-                  continue
-
-              if not tag.startswith("#"):
-                  tag = "#" + tag
-
-              if tag.lower() not in [
-                  x.lower()
-                  for x in cleaned_hashtags
-              ]:
-
-                  cleaned_hashtags.append(tag)
-
-
-          required_hashtags = [
-              "#Shorts",
-              "#YouTubeShorts"
-          ]
-
-
-          for tag in required_hashtags:
-
-              if tag.lower() not in [
-                  x.lower()
-                  for x in cleaned_hashtags
-              ]:
-
-                  cleaned_hashtags.append(tag)
-
-
-          cleaned_hashtags = cleaned_hashtags[:12]
-
-
-          data["hashtags"] = " ".join(
-              cleaned_hashtags
-          )
-
-
-          # Clean tags and enforce max 490 chars.
-          raw_tags = str(
-              data["tags"]
-          )
-
-          tags = []
-
-          for tag in raw_tags.split(","):
-
-              tag = tag.strip()
-
-              if not tag:
-                  continue
-
-              tag = tag.replace("#", "")
-
-              if tag.lower() not in [
-                  x.lower()
-                  for x in tags
-              ]:
-
-                  tags.append(tag)
-
-
-          final_tags = []
-
-          current_length = 0
-
-          for tag in tags:
-
-              addition = (
-                  len(tag)
-                  if not final_tags
-                  else len(tag) + 2
+              data["pov_text"] = (
+                  pov or defaults["pov_text"]
               )
 
-              if current_length + addition > 490:
+              categories = [
+                  "Entertainment",
+                  "Music",
+                  "People & Blogs",
+                  "Comedy",
+                  "Sports",
+                  "Howto & Style",
+                  "Education"
+              ]
+
+              if data["category"] not in categories:
+                  data["category"] = "Entertainment"
+
+              return data
+
+          print("================================")
+          print("GEMINI VIDEO ANALYSIS")
+          print("================================")
+
+          video_file = client.files.upload(file=VIDEO)
+
+          print("Uploaded:", video_file.name)
+
+          # Wait for video processing.
+          waited = 0
+          max_wait = 600
+
+          while waited < max_wait:
+              video_file = client.files.get(
+                  name=video_file.name
+              )
+
+              state = (
+                  video_file.state.name
+                  if video_file.state else "UNKNOWN"
+              )
+
+              print("Gemini state:", state)
+
+              if state == "ACTIVE":
                   break
 
-              final_tags.append(tag)
+              if state == "FAILED":
+                  raise RuntimeError(
+                      "Gemini video processing failed."
+                  )
 
-              current_length += addition
+              time.sleep(5)
+              waited += 5
 
+          else:
+              raise TimeoutError(
+                  "Gemini video processing timed out."
+              )
 
-          data["tags"] = ", ".join(
-              final_tags
-          )
+          result = None
+          last_error = None
 
+          for model in MODELS:
+              for attempt in range(3):
+                  try:
+                      print("Model:", model)
+                      print(
+                          f"Attempt {attempt + 1}/3"
+                      )
 
-          # Clean keywords
-          keywords = []
+                      response = client.models.generate_content(
+                          model=model,
+                          contents=[
+                              video_file,
+                              PROMPT
+                          ]
+                      )
 
-          for keyword in str(
-              data["keywords"]
-          ).split(","):
+                      if not response or not response.text:
+                          raise ValueError(
+                              "Empty Gemini response."
+                          )
 
-              keyword = keyword.strip()
+                      result = clean_metadata(
+                          parse_json(response.text)
+                      )
 
-              if not keyword:
-                  continue
+                      print("Gemini generation successful.")
+                      break
 
-              if keyword.lower() not in [
-                  x.lower()
-                  for x in keywords
-              ]:
+                  except Exception as error:
+                      last_error = error
 
-                  keywords.append(keyword)
+                      print(
+                          "Gemini error:",
+                          type(error).__name__,
+                          str(error)[:400]
+                      )
 
+                      if attempt < 2:
+                          delay = min(
+                              10 * (2 ** attempt),
+                              60
+                          )
 
-          data["keywords"] = ", ".join(
-              keywords[:25]
-          )
+                          print(
+                              "Retrying in",
+                              delay,
+                              "seconds."
+                          )
 
+                          time.sleep(delay)
+
+              if result is not None:
+                  break
+
+              print("Trying backup model.")
+
+          if result is None:
+              raise RuntimeError(
+                  "Gemini failed on all configured models. "
+                  "Stopping upload to avoid incorrect metadata. "
+                  + str(last_error)
+              )
 
           with open(
               "metadata.json",
               "w",
               encoding="utf-8"
           ) as f:
-
               json.dump(
-                  data,
+                  result,
                   f,
                   ensure_ascii=False,
                   indent=2
               )
 
-
-          print("========================================")
+          print("================================")
           print("GENERATED METADATA")
-          print("========================================")
+          print("================================")
 
-          print(
-              json.dumps(
-                  data,
-                  ensure_ascii=False,
-                  indent=2
-              )
-          )
+          print(json.dumps(
+              result,
+              ensure_ascii=False,
+              indent=2
+          ))
 
+          print("Saved: metadata.json")
           PY
 
           python3 gemini_analysis.py
 
-
-      # =========================================================
-      # 12. GENERATE + ADD AI HINGLISH POV OVERLAY
-      # =========================================================
+      # ==================================================
+      # 8. CREATE HINGLISH POV OVERLAY
+      # ==================================================
       - name: Add AI Hinglish POV overlay
         run: |
           python3 - <<'PY'
           import json
           import re
-          import textwrap
-          from pathlib import Path
 
           from PIL import Image, ImageDraw, ImageFont
 
-          METADATA = Path("metadata.json")
-          OUTPUT_DIR = Path("output")
-          OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-          with METADATA.open("r", encoding="utf-8") as f:
+          with open("metadata.json", encoding="utf-8") as f:
               metadata = json.load(f)
 
-          pov = str(metadata.get("pov_text", "")).strip()
+          pov = str(
+              metadata.get("pov_text", "")
+          ).strip()
 
-          # Remove accidental quotes / labels and normalize whitespace.
-          pov = pov.strip("\"' ")
-          pov = re.sub(r"^\s*(POV|POV TEXT)\s*[:\-]\s*", "", pov, flags=re.I)
-          pov = re.sub(r"[\r\n]+", " ", pov)
-          pov = re.sub(r"\s+", " ", pov).strip()
+          pov = re.sub(r"\s+", " ", pov)
+          pov = " ".join(pov.split()[:10])
+          pov = pov[:55]
 
-          # Keep only characters that are safe for the caption renderer.
-          pov = "".join(
-              ch for ch in pov
-              if ch.isprintable()
-          )
-          pov = re.sub(r"[^\x20-\x7E]", "", pov)
-          pov = re.sub(r"\s+", " ", pov).strip()
-
-          # Hard safety limits for a compact Reel-style caption.
           if not pov:
-              pov = "Beat aayi... vibe automatically ON"
-          pov = pov[:55].rstrip()
+              pov = "Steps clean hain, vibe alag hi hai"
 
-          # Limit to a short caption. If Gemini returns too many words,
-          # keep the most natural first 10 words.
-          words = pov.split()
-          if len(words) > 10:
-              pov = " ".join(words[:10])
+          font_path = (
+              "/usr/share/fonts/truetype/dejavu/"
+              "DejaVuSans-Bold.ttf"
+          )
 
-          # Use a clean bold font. GitHub Ubuntu includes DejaVu fonts.
-          font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-          font = ImageFont.truetype(font_path, 48)
+          font = ImageFont.truetype(font_path, 44)
 
-          # Target caption-card width. The card is intentionally NOT full-width.
-          max_text_width = 820
-          horizontal_padding = 28
-          vertical_padding = 18
-          corner_radius = 20
-
-          # Wrap based on actual pixel width so the card stays compact.
-          temp = Image.new("RGBA", (10, 10), (0, 0, 0, 0))
+          temp = Image.new("RGBA", (10, 10))
           draw = ImageDraw.Draw(temp)
 
           lines = []
           current = ""
 
           for word in pov.split():
-              candidate = word if not current else current + " " + word
-              bbox = draw.textbbox((0, 0), candidate, font=font)
-              width = bbox[2] - bbox[0]
+              candidate = (
+                  word if not current
+                  else current + " " + word
+              )
 
-              if width <= max_text_width:
+              width = draw.textbbox(
+                  (0, 0),
+                  candidate,
+                  font=font
+              )[2]
+
+              if width <= 820:
                   current = candidate
               else:
                   if current:
@@ -1087,86 +681,71 @@ jobs:
 
           lines = lines[:2]
 
-          # If the second line is still too wide, reduce the font slightly.
-          while len(lines) > 1:
-              widest = max(
-                  draw.textbbox((0, 0), line, font=font)[2]
-                  for line in lines
-              )
-              if widest <= max_text_width or font.size <= 38:
-                  break
-              font = ImageFont.truetype(font_path, font.size - 2)
+          padding_x = 28
+          padding_y = 18
+          spacing = 8
 
-          line_spacing = 6
-          bboxes = [
+          boxes = [
               draw.textbbox((0, 0), line, font=font)
               for line in lines
           ]
 
           text_width = max(
-              (bbox[2] - bbox[0] for bbox in bboxes),
-              default=0
+              b[2] - b[0] for b in boxes
           )
+
           text_height = sum(
-              bbox[3] - bbox[1]
-              for bbox in bboxes
-          ) + max(0, len(lines) - 1) * line_spacing
+              b[3] - b[1] for b in boxes
+          ) + max(0, len(lines) - 1) * spacing
 
-          card_width = text_width + horizontal_padding * 2
-          card_height = text_height + vertical_padding * 2
+          width = text_width + padding_x * 2
+          height = text_height + padding_y * 2
 
-          # Transparent canvas containing ONLY the rounded white card.
           card = Image.new(
               "RGBA",
-              (card_width, card_height),
+              (width, height),
               (0, 0, 0, 0)
           )
-          card_draw = ImageDraw.Draw(card)
 
-          # Reference-style: white rounded card + black text.
-          card_draw.rounded_rectangle(
-              (0, 0, card_width - 1, card_height - 1),
-              radius=corner_radius,
+          d = ImageDraw.Draw(card)
+
+          d.rounded_rectangle(
+              (0, 0, width - 1, height - 1),
+              radius=20,
               fill=(255, 255, 255, 255)
           )
 
-          y = vertical_padding
-          for index, line in enumerate(lines):
-              bbox = card_draw.textbbox((0, 0), line, font=font)
+          y = padding_y
+
+          for line in lines:
+              bbox = d.textbbox(
+                  (0, 0),
+                  line,
+                  font=font
+              )
+
               line_width = bbox[2] - bbox[0]
               line_height = bbox[3] - bbox[1]
 
-              x = (card_width - line_width) // 2
+              x = (width - line_width) // 2
 
-              card_draw.text(
+              d.text(
                   (x, y),
                   line,
                   font=font,
                   fill=(0, 0, 0, 255)
               )
 
-              y += line_height + line_spacing
+              y += line_height + spacing
 
-          card_path = OUTPUT_DIR / "pov_card.png"
-          card.save(card_path)
+          card.save("output/pov_card.png")
 
-          # Save the clean caption separately for metadata/debugging.
-          overlay_text = "\n".join(lines)
-          (OUTPUT_DIR / "pov.txt").write_text(
-              overlay_text,
-              encoding="utf-8"
-          )
+          with open("output/pov.txt", "w") as f:
+              f.write("\n".join(lines))
 
           metadata["pov_text"] = pov
-          metadata["pov_overlay"] = overlay_text
-          metadata["pov_style"] = {
-              "type": "white_rounded_card_black_text",
-              "position": "top_center",
-              "max_words": 10,
-              "max_characters": 55
-          }
 
-          with METADATA.open("w", encoding="utf-8") as f:
+          with open("metadata.json", "w", encoding="utf-8") as f:
               json.dump(
                   metadata,
                   f,
@@ -1174,70 +753,54 @@ jobs:
                   indent=2
               )
 
-          print("========================================")
-          print("AI HINGLISH POV - REFERENCE STYLE")
-          print("========================================")
-          print(overlay_text)
-          print("Card:", card_path)
-          print("========================================")
+          print("POV:", pov)
           PY
 
-          echo "Adding clean rounded POV card to the video..."
-
-          ffmpeg \
-            -y \
+          ffmpeg -y \
             -i output/youtube_short.mp4 \
             -i output/pov_card.png \
-            -filter_complex "[1:v]format=rgba[card];[0:v][card]overlay=x=(main_w-overlay_w)/2:y=90:format=auto" \
+            -filter_complex \
+            "[1:v]format=rgba[card];[0:v][card]overlay=x=(main_w-overlay_w)/2:y=90:format=auto" \
             -c:v libx264 \
             -preset veryfast \
             -crf 20 \
             -c:a copy \
             -movflags +faststart \
-            output/youtube_short_pov.mp4
+            output/final_short.mp4
 
-          mv output/youtube_short_pov.mp4 output/youtube_short.mp4
+          mv output/final_short.mp4 output/youtube_short.mp4
 
-          echo "POV overlay added successfully."
-          echo "Style: white rounded rectangle + black text + top center"
-          ls -lh output/youtube_short.mp4 output/pov.txt output/pov_card.png
+          echo "POV overlay added."
 
-
-      # =========================================================
-      # 13. PREPARE YOUTUBE OAUTH
-      # =========================================================
-      - name: Prepare YouTube OAuth credentials
+      # ==================================================
+      # 9. CHECK YOUTUBE OAUTH SECRETS
+      # ==================================================
+      - name: Prepare YouTube OAuth
         env:
           YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
         run: |
-
-          echo "========================================"
-          echo "PREPARING YOUTUBE OAUTH"
-          echo "========================================"
-
           if [ -z "$YOUTUBE_CLIENT_ID" ]; then
-            echo "ERROR: YOUTUBE_CLIENT_ID is missing."
+            echo "ERROR: YOUTUBE_CLIENT_ID missing."
             exit 1
           fi
 
           if [ -z "$YOUTUBE_CLIENT_SECRET" ]; then
-            echo "ERROR: YOUTUBE_CLIENT_SECRET is missing."
+            echo "ERROR: YOUTUBE_CLIENT_SECRET missing."
             exit 1
           fi
 
           if [ -z "$YOUTUBE_REFRESH_TOKEN" ]; then
-            echo "ERROR: YOUTUBE_REFRESH_TOKEN is missing."
+            echo "ERROR: YOUTUBE_REFRESH_TOKEN missing."
             exit 1
           fi
 
           echo "YouTube OAuth secrets are configured."
 
-
-      # =========================================================
-      # 14. UPLOAD TO YOUTUBE
-      # =========================================================
+      # ==================================================
+      # 10. UPLOAD TO YOUTUBE
+      # ==================================================
       - name: Upload Short to YouTube
         env:
           YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
@@ -1262,69 +825,91 @@ jobs:
 
           if not CLIENT_ID:
               raise RuntimeError("YOUTUBE_CLIENT_ID is missing.")
+
           if not CLIENT_SECRET:
               raise RuntimeError("YOUTUBE_CLIENT_SECRET is missing.")
+
           if not REFRESH_TOKEN:
               raise RuntimeError("YOUTUBE_REFRESH_TOKEN is missing.")
 
-          with open("metadata.json", "r", encoding="utf-8") as f:
+          with open("metadata.json", encoding="utf-8") as f:
               metadata = json.load(f)
 
-          title = str(metadata.get("title", "Instagram Reel #Shorts")).strip()
-          description = str(metadata.get("description", "")).strip()
-          hashtags = str(metadata.get("hashtags", "")).strip()
-          raw_tags = str(metadata.get("tags", ""))
+          title = str(
+              metadata.get("title", "")
+          ).strip()
+
+          description = str(
+              metadata.get("description", "")
+          ).strip()
+
+          hashtags = str(
+              metadata.get("hashtags", "")
+          ).strip()
+
+          raw_tags = str(
+              metadata.get("tags", "")
+          )
+
+          if not title:
+              raise RuntimeError("Video title is empty.")
 
           def clean_tag(value):
-              value = unicodedata.normalize("NFKC", str(value))
-              value = re.sub(r"https?://\S+|www\.\S+", " ", value, flags=re.I)
+              value = unicodedata.normalize(
+                  "NFKC",
+                  str(value)
+              )
+
+              value = re.sub(
+                  r"https?://\S+|www\.\S+",
+                  " ",
+                  value,
+                  flags=re.I
+              )
+
               value = value.replace("#", " ")
+
               value = "".join(
                   ch for ch in value
                   if unicodedata.category(ch) not in ("Cc", "Cf")
               )
-              value = re.sub(r"\s+", " ", value).strip()
-              value = value.replace(",", " ")
-              return value.strip()
 
-          parsed_tags = []
+              value = re.sub(r"\s+", " ", value).strip()
+              return value.replace(",", " ")
+
+          tags = []
+
           for item in raw_tags.split(","):
               tag = clean_tag(item)
+
               if not tag:
                   continue
+
               if len(tag) > 80:
                   tag = tag[:80].rstrip()
-              if not any(tag.casefold() == old.casefold() for old in parsed_tags):
-                  parsed_tags.append(tag)
 
-          # Keep a safety margin below YouTube's total keyword limit.
+              if tag.casefold() not in [
+                  old.casefold() for old in tags
+              ]:
+                  tags.append(tag)
+
           final_tags = []
-          total_chars = 0
-          MAX_TAG_CHARS = 450
+          total = 0
 
-          for tag in parsed_tags:
-              addition = len(tag) if not final_tags else len(tag) + 1
-              if total_chars + addition > MAX_TAG_CHARS:
+          for tag in tags:
+              addition = len(tag) + (
+                  1 if final_tags else 0
+              )
+
+              if total + addition > 450:
                   break
+
               final_tags.append(tag)
-              total_chars += addition
+              total += addition
 
-          final_tags = [
-              tag for tag in final_tags
-              if tag and len(tag) <= 80 and "\n" not in tag and "\r" not in tag
-          ]
-
-          final_description = (description + "\n\n" + hashtags).strip()
-
-          print("========================================")
-          print("YOUTUBE SEO PAYLOAD")
-          print("========================================")
-          print("Title characters:", len(title))
-          print("Description characters:", len(final_description))
-          print("SEO tag count:", len(final_tags))
-          print("SEO tag characters:", len(", ".join(final_tags)))
-          print("SEO tags:", ", ".join(final_tags))
-          print("========================================")
+          final_description = (
+              description + "\n\n" + hashtags
+          ).strip()
 
           credentials = Credentials(
               token=None,
@@ -1332,13 +917,20 @@ jobs:
               token_uri="https://oauth2.googleapis.com/token",
               client_id=CLIENT_ID,
               client_secret=CLIENT_SECRET,
-              scopes=["https://www.googleapis.com/auth/youtube.upload"]
+              scopes=[
+                  "https://www.googleapis.com/auth/youtube.upload"
+              ]
           )
 
           print("Refreshing YouTube OAuth...")
+
           credentials.refresh(Request())
 
-          youtube = build("youtube", "v3", credentials=credentials)
+          youtube = build(
+              "youtube",
+              "v3",
+              credentials=credentials
+          )
 
           body = {
               "snippet": {
@@ -1353,41 +945,50 @@ jobs:
               }
           }
 
-          media = MediaFileUpload(
-              "output/youtube_short.mp4",
-              mimetype="video/mp4",
-              resumable=True
-          )
-
           def upload_video(upload_body):
+              media = MediaFileUpload(
+                  "output/youtube_short.mp4",
+                  mimetype="video/mp4",
+                  resumable=True
+              )
+
               request = youtube.videos().insert(
                   part="snippet,status",
                   body=upload_body,
                   media_body=media
               )
+
               response = None
+
               while response is None:
                   status, response = request.next_chunk()
+
                   if status:
-                      print("Upload progress:", int(status.progress() * 100), "%")
+                      print(
+                          "Upload progress:",
+                          int(status.progress() * 100),
+                          "%"
+                      )
+
               return response
 
-          print("========================================")
-          print("UPLOADING TO YOUTUBE")
-          print("========================================")
+          print("Uploading Short to YouTube...")
           print("Title:", title)
+          print("SEO tag count:", len(final_tags))
 
           try:
               response = upload_video(body)
 
           except HttpError as error:
               error_text = str(error)
+
               print("YouTube API error:", error_text)
 
-              # If YouTube rejects the keyword field, retry once without tags.
-              if getattr(error.resp, "status", None) == 400 and "invalidTags" in error_text:
-                  print("YouTube rejected SEO tags.")
-                  print("Retrying safely WITHOUT tags...")
+              if (
+                  getattr(error.resp, "status", None) == 400
+                  and "invalidTags" in error_text
+              ):
+                  print("Retrying upload without SEO tags.")
 
                   retry_body = {
                       "snippet": {
@@ -1401,80 +1002,89 @@ jobs:
                       }
                   }
 
-                  media = MediaFileUpload(
-                      "output/youtube_short.mp4",
-                      mimetype="video/mp4",
-                      resumable=True
-                  )
                   response = upload_video(retry_body)
-                  print("Fallback upload succeeded.")
               else:
                   raise
 
           video_id = response.get("id")
+
           if not video_id:
-              raise RuntimeError("YouTube upload did not return a video ID.")
+              raise RuntimeError(
+                  "YouTube did not return a video ID."
+              )
 
           result = {
-              "video_id": str(video_id),
-              "url": "https://www.youtube.com/watch?v=" + str(video_id),
-              "title": str(title),
+              "video_id": video_id,
+              "url": (
+                  "https://www.youtube.com/watch?v="
+                  + video_id
+              ),
+              "title": title,
               "seo_tag_count": len(final_tags),
               "seo_tag_characters": len(", ".join(final_tags))
           }
 
-          with open("youtube_upload_result.json", "w", encoding="utf-8") as f:
-              json.dump(result, f, ensure_ascii=False, indent=2)
+          with open(
+              "youtube_upload_result.json",
+              "w",
+              encoding="utf-8"
+          ) as f:
+              json.dump(
+                  result,
+                  f,
+                  ensure_ascii=False,
+                  indent=2
+              )
 
-          print("========================================")
+          print("================================")
           print("UPLOAD SUCCESSFUL")
-          print("========================================")
+          print("================================")
           print("Video URL:", result["url"])
           PY
 
           python3 upload_youtube.py
 
-      # =========================================================
-      # 15. CHECK YOUTUBE UPLOAD
-      # =========================================================
+      # ==================================================
+      # 11. VERIFY UPLOAD
+      # ==================================================
       - name: Check YouTube upload result
         run: |
-
-          echo "========================================"
-          echo "YOUTUBE UPLOAD RESULT"
-          echo "========================================"
+          if [ ! -s youtube_upload_result.json ]; then
+            echo "ERROR: Upload result not found."
+            exit 1
+          fi
 
           cat youtube_upload_result.json
 
-
-      # =========================================================
-      # 16. SAVE OUTPUTS
-      # =========================================================
-      - name: Upload processed videos and metadata
+      # ==================================================
+      # 12. SAVE ARTIFACTS
+      # ==================================================
+      - name: Save processed videos and metadata
         uses: actions/upload-artifact@v4
         with:
           name: reel-to-youtube-result
           path: |
+            output/reel.mp4
             output/youtube_short.mp4
-            metadata.json
             output/pov.txt
-            youtube_upload_result.json
+            output/pov_card.png
+            metadata.json
             best_section.txt
-          if-no-files-found: ignore
+            video_duration.txt
+            youtube_upload_result.json
+          if-no-files-found: error
+          retention-days: 7
 
-
-      # =========================================================
-      # 17. SUCCESS
-      # =========================================================
-      - name: Test successful
+      # ==================================================
+      # 13. SUCCESS
+      # ==================================================
+      - name: Workflow completed
         run: |
-
-          echo "========================================"
-          echo "REELTOTUBE PROCESSOR COMPLETE"
-          echo "YouTube duplicate checking: DISABLED"
-          echo "========================================"
-
-          echo "STATUS: PROCESSED"
-          echo "UPLOAD: COMPLETED"
-
-          echo "========================================"
+          echo "================================"
+          echo "REELTOTUBE AI 2.0 COMPLETED"
+          echo "================================"
+          echo "Video processing: SUCCESS"
+          echo "Gemini metadata: SUCCESS"
+          echo "POV overlay: SUCCESS"
+          echo "YouTube upload: SUCCESS"
+          echo "================================"
